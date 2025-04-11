@@ -1,10 +1,10 @@
-import { openai } from "@ai-sdk/openai";
 import { Agent } from "@mastra/core/agent";
 import { HttpTool } from "./HttpTool";
 import { KVCache } from "./utils/kv";
 import { DB } from "./utils/db";
 import type { QueryResult } from 'pg';
 import { SchemaDetailsTool } from "./SchemaDetailTool";
+import { createOpenAI } from "@ai-sdk/openai";
 
 // Message type definition (OpenAI compatible)
 export interface Message {
@@ -275,10 +275,17 @@ export class Chat {
   private async getAgent(instructions: string): Promise<Agent> {
     // We always create a fresh agent instance since agent state isn't persistable
     // The conversation state is maintained through the prompt construction
+    
+    // Create OpenRouter provider with API key
+    const openai = createOpenAI({
+      apiKey: this.env.OPENAI_API_KEY,
+      baseURL: "https://openrouter.ai/api/v1",
+    });
+    
     this.agent = new Agent({
       name: "Chat Agent",
       instructions,
-      model: openai(this.env.MODEL_NAME || "gpt-4o-2024-11-20"),
+      model: openai.languageModel("openai/gpt-4o"),
       tools: { HttpTool, SchemaDetailsTool },
     });
     
@@ -364,7 +371,7 @@ export class Chat {
       id: 'chatcmpl-' + Date.now(),
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
-      model: this.env.MODEL_NAME || 'gpt-4o-2024-11-20',
+      model: this.env.MODEL_NAME ? `openai/${this.env.MODEL_NAME}` : 'openai/gpt-4o-2024-11-20',
       choices: [{
         index: 0,
         message: {
@@ -431,7 +438,7 @@ function formatStreamingData(content: string, id: string, finishReason: string |
     id,
     object: "chat.completion.chunk",
     created: Math.floor(Date.now() / 1000),
-    model: "gpt-4o-2024-11-20",
+    model: "openai/gpt-4o-2024-11-20",
     choices: [{
       index: 0,
       delta: content ? { content } : {},

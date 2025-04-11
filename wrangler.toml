@@ -13,6 +13,7 @@ class_name = "Chat"
 tag = "v1"
 new_sqlite_classes = ["Chat"]
 
+
 # KV绑定 - 用于缓存marketplace数据
 [[kv_namespaces]]
 binding = "CHAT_CACHE"

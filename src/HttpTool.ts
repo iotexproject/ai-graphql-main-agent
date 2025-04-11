@@ -36,17 +36,9 @@ export const HttpTool = createTool({
         params
       });
       
-      // Extract headers into a plain object (axios already returns them as object)
-      const responseHeaders: Record<string, string> = {};
-      for (const [key, value] of Object.entries(response.headers)) {
-        responseHeaders[key] = String(value);
-      }
       console.log(JSON.stringify(response.data),'HTTP RES!!!!!!!!!!!!!!!!!');
       return {
-        // status: response.status,
-        // statusText: response.statusText,
         data: response.data,
-        // headers: responseHeaders,
       };
     } catch (error) {
       if (axios.isAxiosError(error)) {

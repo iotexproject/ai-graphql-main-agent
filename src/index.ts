@@ -67,5 +67,7 @@ export default {
 interface Env {
   OPENAI_API_KEY: string;
   MODEL_NAME?: string;
+  DATABASE_URL?: string; // PostgreSQL connection string
+  CHAT_CACHE?: KVNamespace; // KV namespace for caching
   Chat: DurableObjectNamespace;
 }

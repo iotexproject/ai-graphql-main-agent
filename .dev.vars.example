@@ -1,3 +1,21 @@
-OPENAI_API_KEY=sk-proj-1234567890
+# API密钥
+OPENAI_API_KEY=sk-your-openai-api-key
+
+# 模型配置
+MODEL_NAME=gpt-4o-2024-11-20
+
+# 数据库连接
+# 格式: postgresql://username:password@host:port/database
+DATABASE_URL=postgresql://postgres:password@localhost:5432/ai_chat_db
+
+# 使用说明:
+# 1. 复制此文件为 .dev.vars
+# 2. 替换所有占位符值为实际值
+# 3. 创建KV命名空间:
+#    wrangler kv:namespace create "CHAT_CACHE"
+#    wrangler kv:namespace create "CHAT_CACHE" --preview
+# 4. 将创建的KV ID和preview_id复制到wrangler.toml中
+# 5. 使用 `wrangler dev` 命令启动本地开发服务器
+
 # Optional - Cloudflare AI Gateway https://developers.cloudflare.com/ai-gateway/
 # GATEWAY_BASE_URL=https://gateway.ai.cloudflare.com/v1/..

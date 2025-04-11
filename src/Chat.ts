@@ -1,6 +1,10 @@
 import { openai } from "@ai-sdk/openai";
 import { Agent } from "@mastra/core/agent";
 import { HttpTool } from "./HttpTool";
+import { KVCache } from "./utils/kv";
+import { DB } from "./utils/db";
+import type { QueryResult } from 'pg';
+import { SchemaDetailsTool } from "./SchemaDetailTool";
 
 // Message type definition (OpenAI compatible)
 export interface Message {
@@ -19,6 +23,29 @@ interface ChatSession {
   // Instead we'll recreate it when needed
 }
 
+// Marketplace entity definition based on Remult entity
+interface Marketplace {
+  id: string;
+  name: string;
+  description?: string;
+  endpoint: string;
+  headers: Record<string, string>;
+  schemaData: {
+    rootFields: {
+      name: string;
+      description?: string;
+    }[];
+    rawSchema: any;
+  };
+  createdAt?: string;
+}
+
+// 可用的GraphQL查询字段缓存
+interface MarketplaceCache {
+  timestamp: number;
+  data: Marketplace[]; // 使用data字段保持与KVCache一致
+}
+
 // Request body interface for OpenAI-compatible API
 export interface ChatRequestBody {
   messages?: Message[];
@@ -30,6 +57,11 @@ export interface ChatRequestBody {
   projectId?: string; // For backward compatibility
   [key: string]: any; // Allow other properties
 }
+
+// KV缓存键
+const MARKETPLACE_CACHE_KEY = 'marketplaces_data';
+// 缓存过期时间（1小时）- 秒为单位
+const CACHE_TTL = 60 * 60;
 
 /**
  * Chat Durable Object 
@@ -44,6 +76,28 @@ export class Chat {
   constructor(state: DurableObjectState, env: Env) {
     this.storage = state.storage;
     this.env = env;
+    
+    // 初始化工具类，设置全局环境变量
+    this.initializeUtils();
+  }
+  
+  /**
+   * 初始化全局工具类
+   * 使工具可以在不传递环境变量的情况下使用
+   */
+  private initializeUtils(): void {
+    // 初始化数据库工具
+    DB.initialize(this.env.DATABASE_URL);
+    
+    // 初始化KV缓存工具
+    KVCache.initialize(this.env.CHAT_CACHE);
+    
+    // 清除全局存储的其他环境变量
+    if (typeof globalThis !== 'undefined') {
+      (globalThis as any).kvCache = undefined;
+    }
+    
+    console.log('Initialized global utils with environment variables');
   }
 
   /**
@@ -82,22 +136,42 @@ export class Chat {
         });
       }
 
-      // Extract system message if present
-      const systemMessages = messages.filter(msg => msg.role === 'system');
-      const systemPrompt = systemMessages.length > 0 ? systemMessages[0].content : '';
+      // 从用户消息中提取系统消息
+      const userSystemMessages = messages.filter(msg => msg.role === 'system');
+      const userSystemPrompt = userSystemMessages.length > 0 ? userSystemMessages[0].content : '';
       
-      // Update system prompt if changed
-      if (systemPrompt && (!this.session?.systemPrompt || this.session.systemPrompt !== systemPrompt)) {
+      // 加载marketplace数据并生成系统提示
+      const marketplaces = await this.getMarketplaces();
+      console.log({ marketplaces });
+      const enhancedSystemPrompt = this.buildSystemPrompt(marketplaces, userSystemPrompt);
+      
+      // 更新会话中的系统提示
+      if (enhancedSystemPrompt && (!this.session?.systemPrompt || this.session.systemPrompt !== enhancedSystemPrompt)) {
         this.session = {
           ...this.session,
-          systemPrompt,
+          systemPrompt: enhancedSystemPrompt,
           lastUsed: Date.now()
         };
         await this.saveSession();
       }
 
+      // 重新构建消息数组，使用增强的系统提示
+      if (userSystemMessages.length > 0) {
+        // 替换原有系统消息
+        const systemMessageIndex = messages.findIndex(msg => msg.role === 'system');
+        if (systemMessageIndex !== -1) {
+          messages[systemMessageIndex].content = enhancedSystemPrompt;
+        }
+      } else {
+        // 如果没有系统消息，添加一个
+        messages = [
+          { role: 'system', content: enhancedSystemPrompt },
+          ...messages
+        ];
+      }
+
       // Get or create agent
-      const agent = await this.getAgent(systemPrompt || this.session?.systemPrompt || '');
+      const agent = await this.getAgent(enhancedSystemPrompt);
 
       // Prepare prompt from messages
       const prompt = messages.map(msg => {
@@ -137,6 +211,38 @@ export class Chat {
   }
 
   /**
+   * 获取marketplace数据，优先从KV缓存读取，如果缓存不存在或过期则从数据库查询
+   */
+  private async getMarketplaces(): Promise<Marketplace[]> {
+    try {
+      // 使用KVCache工具类获取数据，无需传递KV命名空间
+      return await KVCache.wrap(
+        MARKETPLACE_CACHE_KEY,
+        async () => {
+          // 当缓存不存在或过期时，此函数会被执行以获取新数据
+          return await this.queryMarketplacesFromDB();
+        },
+        {
+          ttl: CACHE_TTL,
+          logHits: true,
+          forceFresh:true
+        }
+      );
+    } catch (error) {
+      console.error('Error getting marketplaces:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 从数据库查询marketplace数据
+   */
+  private async queryMarketplacesFromDB(): Promise<Marketplace[]> {
+    // 使用DB工具类查询marketplaces，无需传递连接字符串
+    return await DB.getMarketplaces() as Marketplace[];
+  }
+
+  /**
    * Load session data from storage
    */
   private async loadSession(): Promise<void> {
@@ -173,7 +279,7 @@ export class Chat {
       name: "Chat Agent",
       instructions,
       model: openai(this.env.MODEL_NAME || "gpt-4o-2024-11-20"),
-      tools: { HttpTool },
+      tools: { HttpTool, SchemaDetailsTool },
     });
     
     return this.agent;
@@ -276,6 +382,47 @@ export class Chat {
       headers: { 'Content-Type': 'application/json' }
     });
   }
+
+  /**
+   * 构建系统提示
+   * 将marketplace数据和用户自定义提示结合生成增强的系统提示
+   */
+  private buildSystemPrompt(marketplaces: Marketplace[], userSystemPrompt: string): string {
+    // 基础提示
+    const baseSystemPrompt = `你是一个多功能AI助手，具有专业的GraphQL API交互能力。
+
+当用户询问你的能力或者你能做什么时，简明扼要地回复：
+"我是一个多功能AI助手，主要特点是具备GraphQL API查询能力。我可以帮你：
+- 查询并分析GraphQL API数据
+- 构建GraphQL查询语句
+- 解释GraphQL模式和类型
+- 回答一般性问题和提供各类信息"
+
+需在回答中展示具体API列表`;
+    
+    // 构建marketplace信息部分
+    let marketplacesInfo = '';
+    if (marketplaces && marketplaces.length > 0) {
+      const marketplacesText = marketplaces.map(marketplace => {
+        const fieldsText = marketplace.schemaData.rootFields
+          .map(field => `  - ${field.name}${field.description ? `: ${field.description}` : ''}`)
+          .join('\n');
+        
+        return `- ${marketplace.name} (ID: ${marketplace.id}): ${marketplace.endpoint}\n${fieldsText}`;
+      }).join('\n\n');
+      
+      marketplacesInfo = `\n\n你可以访问以下GraphQL API和查询:\n${marketplacesText}\n\n
+执行GraphQL查询时，请遵循以下流程:\n
+1. 首先使用SchemaDetailsTool获取GraphQL schema信息，提供marketPlaceId(必填)和需要的queryFields字段名称数组\n
+2. 分析返回的schema信息，了解查询字段的参数类型和返回类型\n
+3. 根据schema信息正确构建GraphQL查询参数和查询语句\n
+4. 使用HttpTool发送请求到相应的endpoint执行查询\n\n
+这个流程非常重要，因为没有正确的schema信息，你将无法知道GraphQL查询需要什么输入参数以及会返回什么输出结构。`;
+    }
+    console.log({ marketplacesInfo });
+    // 组合最终的系统提示
+    return `${baseSystemPrompt}${marketplacesInfo}${userSystemPrompt ? '\n\n' + userSystemPrompt : ''}`;
+  }
 }
 
 // Format SSE streaming data in OpenAI format
@@ -314,4 +461,6 @@ function handleToolEvent(eventType: string, part: any, streamId: string): string
 interface Env {
   OPENAI_API_KEY: string;
   MODEL_NAME?: string;
+  DATABASE_URL?: string; // PostgreSQL connection string
+  CHAT_CACHE?: KVNamespace; // KV namespace for caching
 } 

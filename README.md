@@ -1,242 +1,186 @@
-# 🤖 Chat Agent Starter Kit
+# AI Chat API 服务
 
-![agents-header](https://github.com/user-attachments/assets/f6d99eeb-1803-4495-9c5e-3cf07a37b402)
+基于Cloudflare Workers的OpenAI兼容聊天API服务，具有会话持久化和数据库集成功能。
 
-<a href="https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/agents-starter"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare"/></a>
+## 功能特点
 
-A starter template for building AI-powered chat agents using Cloudflare's Agent platform, powered by [`agents`](https://www.npmjs.com/package/agents). This project provides a foundation for creating interactive chat experiences with AI, complete with a modern UI and tool integration capabilities.
+- 兼容OpenAI Chat API格式
+- 使用Durable Objects实现会话持久化
+- PostgreSQL数据库集成
+- 支持流式响应
+- 支持工具调用（如HttpTool）
+- 自动加载GraphQL marketplace查询并增强提示词
+- KV缓存优化数据库查询性能
 
-## Features
+## 环境要求
 
-- 💬 Interactive chat interface with AI
-- 🛠️ Built-in tool system with human-in-the-loop confirmation
-- 📅 Advanced task scheduling (one-time, delayed, and recurring via cron)
-- 🌓 Dark/Light theme support
-- ⚡️ Real-time streaming responses
-- 🔄 State management and chat history
-- 🎨 Modern, responsive UI
+- [Node.js](https://nodejs.org/) 18+
+- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/)
+- PostgreSQL数据库（可选）
 
-## Prerequisites
+## 安装
 
-- Cloudflare account
-- OpenAI API key
-
-## Quick Start
-
-1. Create a new project:
+1. 克隆仓库
 
 ```bash
-npm create cloudflare@latest -- --template cloudflare/agents-starter
+git clone https://github.com/yourusername/ai-chat-api.git
+cd ai-chat-api
 ```
 
-2. Install dependencies:
+2. 安装依赖
 
 ```bash
 npm install
 ```
 
-3. Set up your environment:
+## 配置
 
-Create a `.dev.vars` file:
+### 环境变量
 
-```env
-OPENAI_API_KEY=your_openai_api_key
+创建一个`.dev.vars`文件用于本地开发（示例）：
+
+```
+OPENAI_API_KEY=sk-your-openai-api-key
+MODEL_NAME=gpt-4o-2024-11-20
+DATABASE_URL=postgresql://username:password@host:port/database
 ```
 
-4. Run locally:
+### 设置秘密环境变量
+
+对于生产环境，使用Wrangler CLI设置秘密：
 
 ```bash
-npm start
+# 设置OpenAI API密钥
+wrangler secret put OPENAI_API_KEY
+
+# 设置数据库连接字符串
+wrangler secret put DATABASE_URL
 ```
 
-5. Deploy:
+## 本地开发
+
+```bash
+npm run dev
+```
+
+访问 `http://localhost:8787` 测试API。
+
+## 部署
+
+1. 登录Cloudflare（如果尚未登录）
+
+```bash
+wrangler login
+```
+
+2. 部署Worker
 
 ```bash
 npm run deploy
 ```
 
-## Project Structure
+## API使用
+
+### 请求格式
+
+发送POST请求到API端点，格式与OpenAI Chat API兼容：
+
+```json
+{
+  "messages": [
+    {"role": "system", "content": "你是一个有用的AI助手。"},
+    {"role": "user", "content": "你好，请告诉我今天是星期几？"}
+  ],
+  "stream": true
+}
+```
+
+### 身份验证
+
+使用Bearer令牌进行身份验证：
 
 ```
-├── src/
-│   ├── app.tsx        # Chat UI implementation
-│   ├── server.ts      # Chat agent logic
-│   ├── tools.ts       # Tool definitions
-│   ├── utils.ts       # Helper functions
-│   └── styles.css     # UI styling
+Authorization: Bearer your-token-here
 ```
 
-## Customization Guide
+## 数据库集成
 
-### Adding New Tools
+本服务使用PostgreSQL存储和检索数据。数据库连接配置通过`DATABASE_URL`环境变量提供。
 
-Add new tools in `tools.ts` using the tool builder:
+### 数据库连接方式
+
+本服务使用`pg`库直接连接PostgreSQL数据库，采用连接池方式优化性能:
 
 ```typescript
-// Example of a tool that requires confirmation
-const searchDatabase = tool({
-  description: "Search the database for user records",
-  parameters: z.object({
-    query: z.string(),
-    limit: z.number().optional(),
-  }),
-  // No execute function = requires confirmation
-});
-
-// Example of an auto-executing tool
-const getCurrentTime = tool({
-  description: "Get current server time",
-  parameters: z.object({}),
-  execute: async () => new Date().toISOString(),
-});
-
-// Scheduling tool implementation
-const scheduleTask = tool({
-  description:
-    "schedule a task to be executed at a later time. 'when' can be a date, a delay in seconds, or a cron pattern.",
-  parameters: z.object({
-    type: z.enum(["scheduled", "delayed", "cron"]),
-    when: z.union([z.number(), z.string()]),
-    payload: z.string(),
-  }),
-  execute: async ({ type, when, payload }) => {
-    // ... see the implementation in tools.ts
-  },
+// 创建连接池
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 5, // 最大连接数
+  idleTimeoutMillis: 30000, // 连接最大空闲时间
+  connectionTimeoutMillis: 5000 // 连接超时
 });
 ```
 
-To handle tool confirmations, add execution functions to the `executions` object:
+### Marketplace数据
 
+服务会自动从数据库的`marketplaces`表中加载GraphQL查询数据，并将其添加到AI的提示词中。这样AI能够了解可用的GraphQL查询字段，并在对话中使用它们。
+
+数据结构如下：
 ```typescript
-export const executions = {
-  searchDatabase: async ({
-    query,
-    limit,
-  }: {
-    query: string;
-    limit?: number;
-  }) => {
-    // Implementation for when the tool is confirmed
-    const results = await db.search(query, limit);
-    return results;
-  },
-  // Add more execution handlers for other tools that require confirmation
-};
+interface Marketplace {
+  id: string;
+  name: string;
+  description?: string;
+  endpoint: string;
+  headers: Record<string, string>;
+  rootFields: {
+    name: string;
+    description?: string;
+  }[];
+  createdAt?: string;
+}
 ```
 
-Tools can be configured in two ways:
+### KV缓存
 
-1. With an `execute` function for automatic execution
-2. Without an `execute` function, requiring confirmation and using the `executions` object to handle the confirmed action
+为了提高性能，marketplace数据会被缓存到Cloudflare KV中，默认缓存时间为1小时。要设置KV：
 
-### Use a different AI model provider
-
-The starting [`server.ts`](https://github.com/cloudflare/agents-starter/blob/main/src/server.ts) implementation uses the [`ai-sdk`](https://sdk.vercel.ai/docs/introduction) and the [OpenAI provider](https://sdk.vercel.ai/providers/ai-sdk-providers/openai), but you can use any AI model provider by:
-
-1. Installing an alternative AI provider for the `ai-sdk`, such as the [`workers-ai-provider`](https://sdk.vercel.ai/providers/community-providers/cloudflare-workers-ai) or [`anthropic`](https://sdk.vercel.ai/providers/ai-sdk-providers/anthropic) provider:
-2. Replacing the AI SDK with the [OpenAI SDK](https://github.com/openai/openai-node)
-3. Using the Cloudflare [Workers AI + AI Gateway](https://developers.cloudflare.com/ai-gateway/providers/workersai/#workers-binding) binding API directly
-
-For example, to use the [`workers-ai-provider`](https://sdk.vercel.ai/providers/community-providers/cloudflare-workers-ai), install the package:
-
-```sh
-npm install workers-ai-provider
+1. 创建KV命名空间：
+```bash
+wrangler kv namespace create CHAT_CACHE
+wrangler kv namespace create CHAT_CACHE --preview
 ```
 
-Add an `ai` binding to `wrangler.jsonc`:
-
-```jsonc
-// rest of file
-  "ai": {
-    "binding": "AI"
-  }
-// rest of file
+2. 将创建的ID更新到`wrangler.toml`中：
+```toml
+[[kv_namespaces]]
+binding = "CHAT_CACHE"
+id = "your-kv-id-here"
+preview_id = "your-preview-kv-id-here"
 ```
 
-Replace the `@ai-sdk/openai` import and usage with the `workers-ai-provider`:
+### 数据库设置
 
-```diff
-// server.ts
-// Change the imports
-- import { openai } from "@ai-sdk/openai";
-+ import { createWorkersAI } from 'workers-ai-provider';
+要在生产环境中使用PostgreSQL：
 
-// Create a Workers AI instance
-+ const workersai = createWorkersAI({ binding: env.AI });
+1. 创建PostgreSQL数据库并获取连接字符串
+2. 使用Wrangler设置DATABASE_URL秘密：
 
-// Use it when calling the streamText method (or other methods)
-// from the ai-sdk
-- const model = openai("gpt-4o-2024-11-20");
-+ const model = workersai("@cf/deepseek-ai/deepseek-r1-distill-qwen-32b")
+```bash
+wrangler secret put DATABASE_URL
 ```
 
-Commit your changes and then run the `agents-starter` as per the rest of this README.
+## 自定义和扩展
 
-### Modifying the UI
+### 添加新工具
 
-The chat interface is built with React and can be customized in `app.tsx`:
+1. 在`tools`目录中创建新的工具模块
+2. 在`Chat.ts`中导入并注册工具
 
-- Modify the theme colors in `styles.css`
-- Add new UI components in the chat container
-- Customize message rendering and tool confirmation dialogs
-- Add new controls to the header
+### 修改模型
 
-### Example Use Cases
+在`.dev.vars`或通过Wrangler secret设置`MODEL_NAME`变量来切换不同的模型。
 
-1. **Customer Support Agent**
+## 许可
 
-   - Add tools for:
-     - Ticket creation/lookup
-     - Order status checking
-     - Product recommendations
-     - FAQ database search
-
-2. **Development Assistant**
-
-   - Integrate tools for:
-     - Code linting
-     - Git operations
-     - Documentation search
-     - Dependency checking
-
-3. **Data Analysis Assistant**
-
-   - Build tools for:
-     - Database querying
-     - Data visualization
-     - Statistical analysis
-     - Report generation
-
-4. **Personal Productivity Assistant**
-
-   - Implement tools for:
-     - Task scheduling with flexible timing options
-     - One-time, delayed, and recurring task management
-     - Task tracking with reminders
-     - Email drafting
-     - Note taking
-
-5. **Scheduling Assistant**
-   - Build tools for:
-     - One-time event scheduling using specific dates
-     - Delayed task execution (e.g., "remind me in 30 minutes")
-     - Recurring tasks using cron patterns
-     - Task payload management
-     - Flexible scheduling patterns
-
-Each use case can be implemented by:
-
-1. Adding relevant tools in `tools.ts`
-2. Customizing the UI for specific interactions
-3. Extending the agent's capabilities in `server.ts`
-4. Adding any necessary external API integrations
-
-## Learn More
-
-- [`agents`](https://github.com/cloudflare/agents/blob/main/packages/agents/README.md)
-- [Cloudflare Agents Documentation](https://developers.cloudflare.com/agents/)
-- [Cloudflare Workers Documentation](https://developers.cloudflare.com/workers/)
-
-## License
-
-MIT
+[MIT许可证](LICENSE)

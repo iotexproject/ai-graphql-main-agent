@@ -29,3 +29,7 @@ preview_id = "ae10a746c5e84abcbe8e33cc6dfb0c08" # 在实际部署时需要替换
 [env.production]
 # production特定配置
 # vars = { MODEL_NAME = "gpt-4o-2024-11-20" } 
+
+[observability]
+enabled = true
+head_sampling_rate = 1 # optional. default = 1.

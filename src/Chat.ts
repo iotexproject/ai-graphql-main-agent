@@ -5,6 +5,7 @@ import { DB } from "./utils/db";
 import type { QueryResult } from 'pg';
 import { SchemaDetailsTool } from "./SchemaDetailTool";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createLogger } from "@mastra/core";
 
 // Message type definition (OpenAI compatible)
@@ -289,16 +290,17 @@ export class Chat {
     console.log('🤖 Creating new agent instance...');
     try {
       // Create OpenRouter provider with API key
-      const openai = createOpenAI({
+      const openai = createOpenRouter({
         apiKey: this.env.OPENAI_API_KEY,
-        baseURL: "https://openrouter.ai/api/v1",
       });
+
       this.agent = new Agent({
         name: "Chat Agent",
         instructions,
         model: openai.languageModel("openai/gpt-4o"),
         tools: { HttpTool, SchemaDetailsTool },
       });
+      
       return this.agent;
     } catch (error) {
       console.error('❌ Error creating agent:', error);
@@ -327,7 +329,7 @@ export class Chat {
           // Send initial role message
           controller.enqueue(encoder.encode(formatStreamingData('', streamId)));
           for await (const part of response.fullStream) {
-            console.log('📦 Processing stream part:', part);
+            // console.log('📦 Processing stream part:', part);
             if (part.type === 'text-delta') {
               // Handle text content
               console.log('📝 Text delta received:', part.textDelta);
@@ -439,7 +441,28 @@ export class Chat {
 - 解释GraphQL模式和类型
 - 回答一般性问题和提供各类信息"
 
-需在回答中展示具体API列表`;
+需在回答中展示具体API列表。
+
+当HTTP调用返回错误时，你应该：
+1. 检查错误信息，分析可能的原因
+2. 适当调整HTTP参数（如headers、query等）后重试
+3. 最多尝试3次
+4. 如果3次尝试后仍然失败，向用户详细说明：
+   - 尝试了哪些调整
+   - 具体的错误信息
+   - 可能的解决建议
+
+关于Schema信息的使用和缓存：
+1. 你应该记住在当前对话中通过SchemaDetailsTool获取的schema信息
+2. 对于相同的marketPlaceId和queryFields组合，无需重复调用SchemaDetailsTool
+3. 只有在以下情况才需要重新调用SchemaDetailsTool：
+   - 查询新的字段
+   - 查询新的marketPlaceId
+   - 用户明确要求刷新schema信息
+4. 在使用缓存的schema信息时，你应该：
+   - 确认这些信息与当前查询相关
+   - 如果不确定信息是否完整，再次调用SchemaDetailsTool
+   - 在响应中注明你正在使用之前获取的schema信息`;
 
     // 构建marketplace信息部分
     let marketplacesInfo = '';
@@ -453,7 +476,7 @@ export class Chat {
       }).join('\n\n');
 
       marketplacesInfo = `\n\n你可以访问以下GraphQL API和查询:\n${marketplacesText}\n\n
-执行GraphQL查询时，请遵循以下流程:\n
+执行任何HTTP或者GraphQL查询时，请遵循以下流程:\n
 1. 首先使用SchemaDetailsTool获取GraphQL schema信息，提供marketPlaceId(必填)和需要的queryFields字段名称数组\n
 2. 分析返回的schema信息，了解查询字段的参数类型和返回类型\n
 3. 根据schema信息正确构建GraphQL查询参数和查询语句\n

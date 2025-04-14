@@ -60,7 +60,7 @@ export const SchemaDetailsTool = createTool({
       const { marketPlaceId, queryFields } = context;
       
       // 缓存键，基于marketplaceId
-      const cacheKey = `schema_marketplace_${marketPlaceId}`;
+      const cacheKey = `schema_marketplace_${marketPlaceId}_${queryFields.join(',')}`;
       
       // 使用KVCache.wrap获取schema数据，如果缓存不存在或过期，会执行回调函数
       const schemaData = await KVCache.wrap(

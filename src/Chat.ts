@@ -5,6 +5,7 @@ import { DB } from "./utils/db";
 import type { QueryResult } from 'pg';
 import { SchemaDetailsTool } from "./SchemaDetailTool";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createLogger } from "@mastra/core";
 
 // Message type definition (OpenAI compatible)
 export interface Message {
@@ -76,11 +77,11 @@ export class Chat {
   constructor(state: DurableObjectState, env: Env) {
     this.storage = state.storage;
     this.env = env;
-    
+
     // 初始化工具类，设置全局环境变量
     this.initializeUtils();
   }
-  
+
   /**
    * 初始化全局工具类
    * 使工具可以在不传递环境变量的情况下使用
@@ -88,15 +89,15 @@ export class Chat {
   private initializeUtils(): void {
     // 初始化数据库工具
     DB.initialize(this.env.DATABASE_URL);
-    
+
     // 初始化KV缓存工具
     KVCache.initialize(this.env.CHAT_CACHE);
-    
+
     // 清除全局存储的其他环境变量
     if (typeof globalThis !== 'undefined') {
       (globalThis as any).kvCache = undefined;
     }
-    
+
     console.log('Initialized global utils with environment variables');
   }
 
@@ -106,31 +107,35 @@ export class Chat {
   async fetch(request: Request): Promise<Response> {
     // Only handle POST requests
     if (request.method !== 'POST') {
+      console.log('❌ Method not allowed:', request.method);
       return new Response('Method not allowed', { status: 405 });
     }
 
     try {
       // Load session data
-      await this.loadSession();
+      console.log('📝 Loading session data...');
+      // await this.loadSession();
+      // console.log('✅ Session loaded:', this.session);
 
       // Parse request body
       const body = await request.json() as ChatRequestBody;
 
       // Extract messages from request body
       let messages: Message[] = [];
-      
+
       if (body.messages && Array.isArray(body.messages)) {
         messages = body.messages;
       } else if (body.message) {
         messages = [{ role: 'user', content: body.message }];
       } else {
+        console.log('❌ Invalid request: No message content');
         return new Response(JSON.stringify({
           error: {
             message: 'Message content is required',
             type: 'invalid_request_error',
             code: 'invalid_message'
           }
-        }), { 
+        }), {
           status: 400,
           headers: { 'Content-Type': 'application/json' }
         });
@@ -139,12 +144,13 @@ export class Chat {
       // 从用户消息中提取系统消息
       const userSystemMessages = messages.filter(msg => msg.role === 'system');
       const userSystemPrompt = userSystemMessages.length > 0 ? userSystemMessages[0].content : '';
-      
-      // 加载marketplace数据并生成系统提示
+
       const marketplaces = await this.getMarketplaces();
-      console.log({ marketplaces });
+      // console.log('✅ Marketplaces loaded:', JSON.stringify(marketplaces, null, 2));
+
       const enhancedSystemPrompt = this.buildSystemPrompt(marketplaces, userSystemPrompt);
-      
+      // console.log('📝 Enhanced system prompt:', enhancedSystemPrompt);
+
       // 更新会话中的系统提示
       if (enhancedSystemPrompt && (!this.session?.systemPrompt || this.session.systemPrompt !== enhancedSystemPrompt)) {
         this.session = {
@@ -175,9 +181,9 @@ export class Chat {
 
       // Prepare prompt from messages
       const prompt = messages.map(msg => {
-        const prefix = msg.role === 'user' ? 'User: ' : 
-                     msg.role === 'assistant' ? 'Assistant: ' : 
-                     msg.role === 'system' ? 'System: ' : '';
+        const prefix = msg.role === 'user' ? 'User: ' :
+          msg.role === 'assistant' ? 'Assistant: ' :
+            msg.role === 'system' ? 'System: ' : '';
         return `${prefix}${msg.content}`;
       }).join('\n\n');
 
@@ -203,7 +209,7 @@ export class Chat {
           code: 'processing_error',
           details: error instanceof Error ? error.message : String(error)
         }
-      }), { 
+      }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
@@ -225,7 +231,7 @@ export class Chat {
         {
           ttl: CACHE_TTL,
           logHits: true,
-          forceFresh:true
+          forceFresh: true
         }
       );
     } catch (error) {
@@ -238,8 +244,15 @@ export class Chat {
    * 从数据库查询marketplace数据
    */
   private async queryMarketplacesFromDB(): Promise<Marketplace[]> {
-    // 使用DB工具类查询marketplaces，无需传递连接字符串
-    return await DB.getMarketplaces() as Marketplace[];
+    console.log('🔍 Querying marketplaces from database...');
+    try {
+      const results = await DB.getMarketplaces() as Marketplace[];
+      // console.log('✅ Database query results:', JSON.stringify(results, null, 2));
+      return results;
+    } catch (error) {
+      console.error('❌ Database query error:', error);
+      throw error;
+    }
   }
 
   /**
@@ -248,7 +261,7 @@ export class Chat {
   private async loadSession(): Promise<void> {
     // Try to load existing session
     const session = await this.storage.get<ChatSession>('session');
-    
+
     if (session) {
       this.session = session;
     } else {
@@ -273,23 +286,24 @@ export class Chat {
    * Get or create agent for this session
    */
   private async getAgent(instructions: string): Promise<Agent> {
-    // We always create a fresh agent instance since agent state isn't persistable
-    // The conversation state is maintained through the prompt construction
-    
-    // Create OpenRouter provider with API key
-    const openai = createOpenAI({
-      apiKey: this.env.OPENAI_API_KEY,
-      baseURL: "https://openrouter.ai/api/v1",
-    });
-    
-    this.agent = new Agent({
-      name: "Chat Agent",
-      instructions,
-      model: openai.languageModel("openai/gpt-4o"),
-      tools: { HttpTool, SchemaDetailsTool },
-    });
-    
-    return this.agent;
+    console.log('🤖 Creating new agent instance...');
+    try {
+      // Create OpenRouter provider with API key
+      const openai = createOpenAI({
+        apiKey: this.env.OPENAI_API_KEY,
+        baseURL: "https://openrouter.ai/api/v1",
+      });
+      this.agent = new Agent({
+        name: "Chat Agent",
+        instructions,
+        model: openai.languageModel("openai/gpt-4o"),
+        tools: { HttpTool, SchemaDetailsTool },
+      });
+      return this.agent;
+    } catch (error) {
+      console.error('❌ Error creating agent:', error);
+      throw error;
+    }
   }
 
   /**
@@ -298,51 +312,56 @@ export class Chat {
   private handleStreamingResponse(agent: Agent, prompt: string): Response {
     // Generate unique stream ID
     const streamId = 'chatcmpl-' + Date.now().toString(36);
-    
+
     // Stream response
     const responsePromise = agent.stream(prompt);
-    
+
     // Create response stream
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
-        
+
         try {
           // Get the response
           const response = await responsePromise;
-          
           // Send initial role message
           controller.enqueue(encoder.encode(formatStreamingData('', streamId)));
-          
-          // Process streaming response
           for await (const part of response.fullStream) {
+            console.log('📦 Processing stream part:', part);
             if (part.type === 'text-delta') {
               // Handle text content
+              console.log('📝 Text delta received:', part.textDelta);
               controller.enqueue(encoder.encode(formatStreamingData(part.textDelta, streamId)));
-            } 
+            }
             // Handle tool events
             else if (['tool-call', 'tool-call-streaming-start', 'tool-result'].includes(part.type)) {
+              console.log('🔧 Tool event received:', part.type);
               const formattedData = handleToolEvent(part.type, part, streamId);
               if (formattedData) {
                 controller.enqueue(encoder.encode(formattedData));
               }
+            } else if (part.type === 'error') {
+              console.log('🔧 Error:', part);
+            } else {
+              console.log('🔧 Unknown event:', part);
             }
           }
-          
           // Send completion
           controller.enqueue(encoder.encode(formatStreamingData('', streamId, 'stop')));
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
         } catch (error) {
           // Handle error in stream
+          console.error('❌ Error in stream processing:', error);
           controller.enqueue(encoder.encode(formatStreamingData('\n\n[Error occurred]', streamId)));
           controller.enqueue(encoder.encode(formatStreamingData('', streamId, 'stop')));
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
         } finally {
+          console.log('🏁 Stream closed');
           controller.close();
         }
       }
     });
-    
+
     // Return response with proper headers
     return new Response(stream, {
       headers: {
@@ -358,36 +377,51 @@ export class Chat {
    * Handle standard (non-streaming) response
    */
   private async handleStandardResponse(agent: Agent, prompt: string): Promise<Response> {
-    // Generate non-streaming response
-    const response = await agent.generate(prompt);
-    const responseText = response.text;
-    
-    // Calculate token estimates
-    const inputTokens = prompt.length / 4; // Very rough estimate
-    const outputTokens = responseText.length / 4; // Very rough estimate
-    
-    // Return standard OpenAI format response
-    return new Response(JSON.stringify({
-      id: 'chatcmpl-' + Date.now(),
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model: this.env.MODEL_NAME ? `openai/${this.env.MODEL_NAME}` : 'openai/gpt-4o-2024-11-20',
-      choices: [{
-        index: 0,
-        message: {
-          role: 'assistant',
-          content: responseText
-        },
-        finish_reason: 'stop'
-      }],
-      usage: {
-        prompt_tokens: Math.round(inputTokens),
-        completion_tokens: Math.round(outputTokens),
-        total_tokens: Math.round(inputTokens + outputTokens)
-      }
-    }), {
-      headers: { 'Content-Type': 'application/json' }
-    });
+    try {
+      // Generate non-streaming response
+      const response = await agent.generate(prompt);
+      const responseText = response.text;
+
+      // Calculate token estimates
+      const inputTokens = prompt.length / 4; // Very rough estimate
+      const outputTokens = responseText.length / 4; // Very rough estimate
+
+      // Return standard OpenAI format response
+      return new Response(JSON.stringify({
+        id: 'chatcmpl-' + Date.now(),
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: this.env.MODEL_NAME ? `openai/${this.env.MODEL_NAME}` : 'openai/gpt-4o-2024-11-20',
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: responseText
+          },
+          finish_reason: 'stop'
+        }],
+        usage: {
+          prompt_tokens: Math.round(inputTokens),
+          completion_tokens: Math.round(outputTokens),
+          total_tokens: Math.round(inputTokens + outputTokens)
+        }
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      console.error('Error generating standard response:', error);
+      return new Response(JSON.stringify({
+        error: {
+          message: 'Failed to generate standard response',
+          type: 'server_error',
+          code: 'processing_error',
+          details: error instanceof Error ? error.message : String(error)
+        }
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
   }
 
   /**
@@ -406,7 +440,7 @@ export class Chat {
 - 回答一般性问题和提供各类信息"
 
 需在回答中展示具体API列表`;
-    
+
     // 构建marketplace信息部分
     let marketplacesInfo = '';
     if (marketplaces && marketplaces.length > 0) {
@@ -414,10 +448,10 @@ export class Chat {
         const fieldsText = marketplace.schemaData.rootFields
           .map(field => `  - ${field.name}${field.description ? `: ${field.description}` : ''}`)
           .join('\n');
-        
+
         return `- ${marketplace.name} (ID: ${marketplace.id}): ${marketplace.endpoint}\n${fieldsText}`;
       }).join('\n\n');
-      
+
       marketplacesInfo = `\n\n你可以访问以下GraphQL API和查询:\n${marketplacesText}\n\n
 执行GraphQL查询时，请遵循以下流程:\n
 1. 首先使用SchemaDetailsTool获取GraphQL schema信息，提供marketPlaceId(必填)和需要的queryFields字段名称数组\n
@@ -426,7 +460,6 @@ export class Chat {
 4. 使用HttpTool发送请求到相应的endpoint执行查询\n\n
 这个流程非常重要，因为没有正确的schema信息，你将无法知道GraphQL查询需要什么输入参数以及会返回什么输出结构。`;
     }
-    console.log({ marketplacesInfo });
     // 组合最终的系统提示
     return `${baseSystemPrompt}${marketplacesInfo}${userSystemPrompt ? '\n\n' + userSystemPrompt : ''}`;
   }
@@ -438,7 +471,7 @@ function formatStreamingData(content: string, id: string, finishReason: string |
     id,
     object: "chat.completion.chunk",
     created: Math.floor(Date.now() / 1000),
-    model: "openai/gpt-4o-2024-11-20",
+    model: "openai/gpt-4o",
     choices: [{
       index: 0,
       delta: content ? { content } : {},

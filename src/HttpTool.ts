@@ -1,6 +1,25 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import axios from 'axios';
+import { KVCache } from "./utils/kv";
+
+/**
+ * 生成HTTP请求的缓存键
+ * 根据请求参数创建唯一的缓存键
+ */
+function generateCacheKey(url: string, method: string, headers: Record<string, string>, body?: any, params?: Record<string, string>): string {
+  // 创建一个包含所有请求参数的对象
+  const requestData = {
+    url,
+    method,
+    headers,
+    body,
+    params
+  };
+  
+  // 将对象转换为JSON字符串，然后创建缓存键
+  return `http_cache_${Buffer.from(JSON.stringify(requestData)).toString('base64')}`;
+}
 
 export const HttpTool = createTool({
   id: "http-request",
@@ -24,22 +43,35 @@ export const HttpTool = createTool({
       const { url, method, headers = {}, body, params } = context;
       console.log({ url, method, headers, body, params });
       
-      // Make the request with axios
-      const response = await axios({
-        url,
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          ...headers,
-        },
-        data: body,
-        params
-      });
+      // 生成缓存键
+      const cacheKey = generateCacheKey(url, method, headers, body, params);
       
-      console.log(JSON.stringify(response.data),'HTTP RES!!!!!!!!!!!!!!!!!');
-      return {
-        data: response.data,
-      };
+      // 使用KVCache包装axios请求，缓存60秒
+      return await KVCache.wrap(
+        cacheKey,
+        async () => {
+          // Make the request with axios
+          const response = await axios({
+            url,
+            method,
+            headers: {
+              'Content-Type': 'application/json',
+              ...headers,
+            },
+            data: body,
+            params
+          });
+          
+          console.log(JSON.stringify(response.data),'HTTP RES!!!!!!!!!!!!!!!!!');
+          return {
+            data: response.data,
+          };
+        },
+        {
+          ttl: 60, // 缓存60秒
+          logHits: true, // 记录缓存命中日志
+        }
+      );
     } catch (error) {
       if (axios.isAxiosError(error)) {
         // Handle Axios errors nicely with response info if available

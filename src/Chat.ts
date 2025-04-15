@@ -290,6 +290,7 @@ export class Chat {
     console.log('🤖 Creating new agent instance...');
     try {
       // Create OpenRouter provider with API key
+      console.log(this.env.OPENAI_API_KEY,'this.env.OPENAI_API_KEY')
       const openai = createOpenRouter({
         apiKey: this.env.OPENAI_API_KEY,
       });

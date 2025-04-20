@@ -92,55 +92,58 @@ export class DB {
   }
   
   /**
-   * 查询marketplaces表
-   * @returns marketplaces数据
+   * 查询remoteSchemas表
+   * @returns remoteSchemas数据
    */
-  static async getMarketplaces(): Promise<any[]> {
+  static async getRemoteSchemasFromProjectId(projectId: string): Promise<any[]> {
+    console.log('getRemoteSchemasFromProjectId', projectId);
     try {
       // 执行查询获取所有marketplace记录
       const result = await this.query(
-        'SELECT id, name, description, endpoint, headers, "schemaData", "createdAt" FROM marketplaces'
+        'SELECT id, name, description, endpoint, headers, "schemaData", "createdAt" FROM "remoteSchemas" WHERE project = $1',
+        [projectId]
       );
       
       // 检查查询结果
       if (result && result.rows && Array.isArray(result.rows)) {
-        console.log(`Found ${result.rows.length} marketplaces`);
+        console.log(`Found ${result.rows.length} remoteSchemas`);
         return result.rows;
       }
       
       return [];
     } catch (error) {
-      console.error('Error querying marketplaces from DB:', error);
+      console.error('Error querying remoteSchemas from DB:', error);
       return [];
     }
   }
   
   /**
-   * 根据ID查询单个marketplace
-   * @param marketplaceId marketplace的ID
-   * @returns 单个marketplace数据
+   * 根据ID查询单个remoteSchema
+   * @param remoteSchemaId remoteSchema的ID
+   * @returns 单个remoteSchema数据
    */
-  static async getMarketplaceById(marketplaceId: string): Promise<any | null> {
+  static async getRemoteSchemaById(remoteSchemaId: string): Promise<any | null> {
     try {
       // 执行查询获取指定ID的marketplace记录
       const result = await this.query(
-        'SELECT id, name, description, endpoint, headers, "schemaData", "createdAt" FROM marketplaces WHERE id = $1',
-        [marketplaceId]
+        'SELECT id, name, description, endpoint, headers, "schemaData", "createdAt" FROM "remoteSchemas" WHERE id = $1',
+        [remoteSchemaId]
       );
       
       // 检查查询结果
       if (result && result.rows && result.rows.length > 0) {
-        console.log(`Found marketplace with ID: ${marketplaceId}`);
+        console.log(`Found marketplace with ID: ${remoteSchemaId}`);
         return result.rows[0];
       }
       
-      console.warn(`No marketplace found with ID: ${marketplaceId}`);
+      console.warn(`No marketplace found with ID: ${remoteSchemaId}`);
       return null;
     } catch (error) {
-      console.error(`Error querying marketplace with ID ${marketplaceId} from DB:`, error);
+      console.error(`Error querying marketplace with ID ${remoteSchemaId} from DB:`, error);
       return null;
     }
   }
+  
   
   /**
    * 关闭数据库连接池

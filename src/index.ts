@@ -67,8 +67,16 @@ export default {
       // Get the Durable Object stub
       const chatDO = env.Chat.get(chatId);
       
+      // Create a new request with custom token header
+      const newRequest = new Request(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body
+      });
+      newRequest.headers.set('X-Custom-Token', token);
+      
       // Forward the request to the Durable Object
-      const response = await chatDO.fetch(request);
+      const response = await chatDO.fetch(newRequest);
       
       // Clone the response to add CORS headers
       const corsResponse = new Response(response.body, response);

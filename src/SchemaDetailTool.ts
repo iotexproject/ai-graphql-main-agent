@@ -48,30 +48,30 @@ const CACHE_TTL = 3600; // 1小时
 
 export const SchemaDetailsTool = createTool({
   id: "schema-details",
-  description: "Fetch GraphQL schema details for a specific marketplace",
+  description: "Fetch GraphQL schema details for a specific remote schema",
   inputSchema: z.object({
-    marketPlaceId: z.string().describe("The marketplace ID to fetch schema details for"),
+    remoteSchemaId: z.string().describe("The remoteschema ID to fetch schema details for"),
     queryFields: z.array(z.string()).describe("List of query field names to get details for"),
   }),
   execute: async ({ context }) => {
     console.log('SchemaDetailsTool execute', context);
     try {
       // 从context获取参数
-      const { marketPlaceId, queryFields } = context;
+      const { remoteSchemaId, queryFields } = context;
       
       // 缓存键，基于marketplaceId
-      const cacheKey = `schema_marketplace_${marketPlaceId}_${queryFields.join(',')}`;
+      const cacheKey = `schema_remote_${remoteSchemaId}_${queryFields.join(',')}`;
       
       // 使用KVCache.wrap获取schema数据，如果缓存不存在或过期，会执行回调函数
       const schemaData = await KVCache.wrap(
         cacheKey,
         async () => {
-          console.log(`Fetching schema for marketplace ID: ${marketPlaceId}`);
+          console.log(`Fetching schema for remote schema ID: ${remoteSchemaId}`);
           
           // 从数据库获取marketplace - 无需传递连接字符串，使用全局初始化的
-          const dbResult = await DB.getMarketplaceById(marketPlaceId);
+          const dbResult = await DB.getRemoteSchemaById(remoteSchemaId);
           if (!dbResult) {
-            throw new Error(`Marketplace with ID ${marketPlaceId} not found`);
+            throw new Error(`Marketplace with ID ${remoteSchemaId} not found`);
           }
           
           // 从marketplace中获取schema
@@ -98,7 +98,7 @@ export const SchemaDetailsTool = createTool({
       return {
         success: true,
         data: {
-          marketPlaceId,
+          remoteSchemaId,
           ...result
         }
       };

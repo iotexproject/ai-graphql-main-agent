@@ -26,7 +26,7 @@ interface ChatSession {
 }
 
 // Marketplace entity definition based on Remult entity
-interface Marketplace {
+interface RemoteSchema {
   id: string;
   name: string;
   description?: string;
@@ -43,9 +43,9 @@ interface Marketplace {
 }
 
 // 可用的GraphQL查询字段缓存
-interface MarketplaceCache {
+interface RemoteSchemaCache {
   timestamp: number;
-  data: Marketplace[]; // 使用data字段保持与KVCache一致
+  data: RemoteSchema[]; // 使用data字段保持与KVCache一致
 }
 
 // Request body interface for OpenAI-compatible API
@@ -61,7 +61,7 @@ export interface ChatRequestBody {
 }
 
 // KV缓存键
-const MARKETPLACE_CACHE_KEY = 'marketplaces_data';
+const MARKETPLACE_CACHE_KEY = 'remoteSchemas_data';
 // 缓存过期时间（1小时）- 秒为单位
 const CACHE_TTL = 60 * 60;
 
@@ -74,12 +74,11 @@ export class Chat {
   private env: Env;
   private session: ChatSession | null = null;
   private agent: Agent | null = null;
+  private token: string | null = null;
 
   constructor(state: DurableObjectState, env: Env) {
     this.storage = state.storage;
     this.env = env;
-
-    // 初始化工具类，设置全局环境变量
     this.initializeUtils();
   }
 
@@ -113,6 +112,14 @@ export class Chat {
     }
 
     try {
+      // Check for custom token header
+      const customToken = request.headers.get('X-Custom-Token');
+      if (customToken) {
+        // Use the token from the header
+        this.token = customToken;
+        console.log('Using custom token from header:', this.token);
+      }
+      
       // Load session data
       console.log('📝 Loading session data...');
       // await this.loadSession();
@@ -146,10 +153,10 @@ export class Chat {
       const userSystemMessages = messages.filter(msg => msg.role === 'system');
       const userSystemPrompt = userSystemMessages.length > 0 ? userSystemMessages[0].content : '';
 
-      const marketplaces = await this.getMarketplaces();
-      // console.log('✅ Marketplaces loaded:', JSON.stringify(marketplaces, null, 2));
+      const remoteSchemas = await this.getRemoteSchemas();
+      // console.log('✅ Marketplaces loaded:', JSON.stringify(remoteSchemas, null, 2));
 
-      const enhancedSystemPrompt = this.buildSystemPrompt(marketplaces, userSystemPrompt);
+      const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, userSystemPrompt);
       // console.log('📝 Enhanced system prompt:', enhancedSystemPrompt);
 
       // 更新会话中的系统提示
@@ -218,16 +225,16 @@ export class Chat {
   }
 
   /**
-   * 获取marketplace数据，优先从KV缓存读取，如果缓存不存在或过期则从数据库查询
+   * 获取remoteSchema数据，优先从KV缓存读取，如果缓存不存在或过期则从数据库查询
    */
-  private async getMarketplaces(): Promise<Marketplace[]> {
+  private async getRemoteSchemas(): Promise<RemoteSchema[]> {
     try {
       // 使用KVCache工具类获取数据，无需传递KV命名空间
       return await KVCache.wrap(
         MARKETPLACE_CACHE_KEY,
         async () => {
           // 当缓存不存在或过期时，此函数会被执行以获取新数据
-          return await this.queryMarketplacesFromDB();
+          return await this.queryRemoteSchemasFromDB();
         },
         {
           ttl: CACHE_TTL,
@@ -236,41 +243,23 @@ export class Chat {
         }
       );
     } catch (error) {
-      console.error('Error getting marketplaces:', error);
+      console.error('Error getting remoteSchemas:', error);
       return [];
     }
   }
 
   /**
-   * 从数据库查询marketplace数据
+   * 从数据库查询remoteSchema数据
    */
-  private async queryMarketplacesFromDB(): Promise<Marketplace[]> {
-    console.log('🔍 Querying marketplaces from database...');
+  private async queryRemoteSchemasFromDB(): Promise<RemoteSchema[]> {
+    console.log('🔍 Querying remoteSchemas from database...');
     try {
-      const results = await DB.getMarketplaces() as Marketplace[];
+      const results = await DB.getRemoteSchemasFromProjectId(this.token!) as RemoteSchema[];
       // console.log('✅ Database query results:', JSON.stringify(results, null, 2));
       return results;
     } catch (error) {
       console.error('❌ Database query error:', error);
       throw error;
-    }
-  }
-
-  /**
-   * Load session data from storage
-   */
-  private async loadSession(): Promise<void> {
-    // Try to load existing session
-    const session = await this.storage.get<ChatSession>('session');
-
-    if (session) {
-      this.session = session;
-    } else {
-      // Create a new session if none exists
-      this.session = {
-        lastUsed: Date.now()
-      };
-      await this.saveSession();
     }
   }
 
@@ -290,7 +279,7 @@ export class Chat {
     console.log('🤖 Creating new agent instance...');
     try {
       // Create OpenRouter provider with API key
-      console.log(this.env.OPENAI_API_KEY,'this.env.OPENAI_API_KEY')
+      console.log(this.env.OPENAI_API_KEY, 'this.env.OPENAI_API_KEY')
       const openai = createOpenRouter({
         apiKey: this.env.OPENAI_API_KEY,
       });
@@ -301,7 +290,7 @@ export class Chat {
         model: openai.languageModel("openai/gpt-4o"),
         tools: { HttpTool, SchemaDetailsTool },
       });
-      
+
       return this.agent;
     } catch (error) {
       console.error('❌ Error creating agent:', error);
@@ -429,9 +418,9 @@ export class Chat {
 
   /**
    * 构建系统提示
-   * 将marketplace数据和用户自定义提示结合生成增强的系统提示
+   * 将remoteSchema数据和用户自定义提示结合生成增强的系统提示
    */
-  private buildSystemPrompt(marketplaces: Marketplace[], userSystemPrompt: string): string {
+  private buildSystemPrompt(remoteSchemas: RemoteSchema[], userSystemPrompt: string): string {
     // 基础提示
     const baseSystemPrompt = `你是一个多功能AI助手，具有专业的GraphQL API交互能力。
 
@@ -465,27 +454,30 @@ export class Chat {
    - 如果不确定信息是否完整，再次调用SchemaDetailsTool
    - 在响应中注明你正在使用之前获取的schema信息`;
 
-    // 构建marketplace信息部分
-    let marketplacesInfo = '';
-    if (marketplaces && marketplaces.length > 0) {
-      const marketplacesText = marketplaces.map(marketplace => {
-        const fieldsText = marketplace.schemaData.rootFields
+    // 构建remoteSchema信息部分
+    let remoteSchemasInfo = '';
+    if (remoteSchemas && remoteSchemas.length > 0) {
+      const remoteSchemasText = remoteSchemas.map(remoteSchema => {
+        const fieldsText = remoteSchema.schemaData.rootFields
           .map(field => `  - ${field.name}${field.description ? `: ${field.description}` : ''}`)
           .join('\n');
 
-        return `- ${marketplace.name} (ID: ${marketplace.id}): ${marketplace.endpoint}\n${fieldsText}`;
+        return `- ${remoteSchema.name} (RemoteSchema ID(用于使用SchemaDetailTool): ${remoteSchema.id}), 
+        Graphql endpoint: https://graphql.949729789.xyz/graphql \n${fieldsText}`;
       }).join('\n\n');
 
-      marketplacesInfo = `\n\n你可以访问以下GraphQL API和查询:\n${marketplacesText}\n\n
+      remoteSchemasInfo = `\n\n你可以访问以下GraphQL API和查询:\n${remoteSchemasText}\n\n
 执行任何HTTP或者GraphQL查询时，请遵循以下流程:\n
 1. 首先使用SchemaDetailsTool获取GraphQL schema信息，提供marketPlaceId(必填)和需要的queryFields字段名称数组\n
 2. 分析返回的schema信息，了解查询字段的参数类型和返回类型\n
 3. 根据schema信息正确构建GraphQL查询参数和查询语句\n
 4. 使用HttpTool发送请求到相应的endpoint执行查询\n\n
+5. 每个HttpTool请求必须带上headers: { 'x-project-id': ${this.token} }\n
 这个流程非常重要，因为没有正确的schema信息，你将无法知道GraphQL查询需要什么输入参数以及会返回什么输出结构。`;
     }
+    console.log(remoteSchemasInfo, 'remoteSchemasInfo')
     // 组合最终的系统提示
-    return `${baseSystemPrompt}${marketplacesInfo}${userSystemPrompt ? '\n\n' + userSystemPrompt : ''}`;
+    return `${baseSystemPrompt}${remoteSchemasInfo}${userSystemPrompt ? '\n\n' + userSystemPrompt : ''}`;
   }
 }
 

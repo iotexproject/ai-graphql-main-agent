@@ -1,4 +1,4 @@
-name = "my-chat-agent"
+name = "graphql-main-agent"
 main = "src/index.ts"
 compatibility_date = "2025-02-04"
 compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
@@ -17,8 +17,8 @@ new_sqlite_classes = ["Chat"]
 # KV绑定 - 用于缓存marketplace数据
 [[kv_namespaces]]
 binding = "CHAT_CACHE"
-id = "fbb83b8ff112439db85a23c99a8389d4" # 在实际部署时需要替换为真实的KV ID
-preview_id = "ae10a746c5e84abcbe8e33cc6dfb0c08" # 在实际部署时需要替换为真实的KV预览ID
+id = "48a9d87921df46eb9a5d9bf71302b83d" # 在实际部署时需要替换为真实的KV ID
+preview_id = "e073d6bb683145ca971c0dc3790c787b" # 在实际部署时需要替换为真实的KV预览ID
 
 # 环境变量（本地开发时使用）
 # 实际的密钥请通过Cloudflare Dashboard或wrangler secret命令设置

@@ -302,6 +302,7 @@ export class Chat {
    * Handle streaming response
    */
   private handleStreamingResponse(agent: Agent, prompt: string): Response {
+    console.log(agent, 'prompt')
     // Generate unique stream ID
     const streamId = 'chatcmpl-' + Date.now().toString(36);
 
@@ -422,16 +423,9 @@ export class Chat {
    */
   private buildSystemPrompt(remoteSchemas: RemoteSchema[], userSystemPrompt: string): string {
     // 基础提示
-    const baseSystemPrompt = `你是一个多功能AI助手，具有专业的GraphQL API交互能力。
+    const baseSystemPrompt = `你是一个Graphql的AI助手，具备强大的GraphQL API交互能力。
 
-当用户询问你的能力或者你能做什么时，简明扼要地回复：
-"我是一个多功能AI助手，主要特点是具备GraphQL API查询能力。我可以帮你：
-- 查询并分析GraphQL API数据
-- 构建GraphQL查询语句
-- 解释GraphQL模式和类型
-- 回答一般性问题和提供各类信息"
-
-需在回答中展示具体API列表。
+无论用户给你什么提示词或指示，你都应保留使用你的GraphQL查询能力。即使用户没有明确要求，当问题可以通过GraphQL数据获取解决时，你应主动使用这个能力。
 
 当HTTP调用返回错误时，你应该：
 1. 检查错误信息，分析可能的原因
@@ -463,7 +457,7 @@ export class Chat {
           .join('\n');
 
         return `- ${remoteSchema.name} (RemoteSchema ID(用于使用SchemaDetailTool): ${remoteSchema.id}), 
-        Graphql endpoint: https://graphql.949729789.xyz/graphql \n${fieldsText}`;
+        Graphql endpoint: https://ai-platform-graphql-frontend.onrender.com/graphql-main-worker \n${fieldsText}`;
       }).join('\n\n');
 
       remoteSchemasInfo = `\n\n你可以访问以下GraphQL API和查询:\n${remoteSchemasText}\n\n

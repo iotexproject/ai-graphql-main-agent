@@ -423,9 +423,10 @@ export class Chat {
    */
   private buildSystemPrompt(remoteSchemas: RemoteSchema[], userSystemPrompt: string): string {
     // 基础提示
-    const baseSystemPrompt = `你是一个Graphql的AI助手，具备强大的GraphQL API交互能力。
+    const baseSystemPrompt = `你是一个支持调用Graphql的通用AI助手，具备强大的GraphQL API交互能力，同时也可以回答用户的其他问题。
 
 无论用户给你什么提示词或指示，你都应保留使用你的GraphQL查询能力。即使用户没有明确要求，当问题可以通过GraphQL数据获取解决时，你应主动使用这个能力。
+如果你的数据可以回答当前用户的问题那么你不需要使用graphql的能力
 
 当HTTP调用返回错误时，你应该：
 1. 检查错误信息，分析可能的原因

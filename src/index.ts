@@ -10,8 +10,8 @@ export { Chat };
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*", // 或者指定允许的域名
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Methods": "*",
+    "Access-Control-Allow-Headers": "*",
     "Access-Control-Max-Age": "86400",
   };
 }

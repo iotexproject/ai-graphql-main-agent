@@ -498,10 +498,14 @@ function handleToolEvent(eventType: string, part: any, streamId: string): string
     case 'tool-call':
     case 'tool-call-streaming-start': {
       const toolName = part.toolName || (part as any).toolCall?.name || "unknown";
-      return formatStreamingData(`\n\n🔧 ${toolName} ⏳`, streamId);
+      const formatToolName = toolName.replace('SchemaDetailsTool', 'Fetching Schema Details...')
+      .replace('HttpTool', 'Fetching Data...')
+      return formatStreamingData(`\n\n🔧 ${formatToolName} ⏳`, streamId);
     }
     case 'tool-result': {
-      return formatStreamingData(`\n\n✅ ${part.toolName} ✓`, streamId);
+      const formatToolName = part.toolName.replace('SchemaDetailsTool', 'Schema Details Fetched')
+      .replace('HttpTool', 'Data Fetched')
+      return formatStreamingData(`\n\n✅ ${formatToolName} ✓ \n\n`, streamId);
     }
     default:
       return null;

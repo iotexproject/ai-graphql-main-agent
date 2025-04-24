@@ -41,7 +41,8 @@ export const HttpTool = createTool({
     try {
       // Extract parameters from context
       const { url, method, headers = {}, body, params } = context;
-      console.log({ url, method, headers, body, params });
+      console.log({ url, method, headers,params });
+      console.log(JSON.stringify(body),'HTTP BODY!!!!!!!!!!!!!!!!!');
       
       // 生成缓存键
       const cacheKey = generateCacheKey(url, method, headers, body, params);

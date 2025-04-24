@@ -500,12 +500,12 @@ function handleToolEvent(eventType: string, part: any, streamId: string): string
       const toolName = part.toolName || (part as any).toolCall?.name || "unknown";
       const formatToolName = toolName.replace('SchemaDetailsTool', 'Fetching Schema Details...')
       .replace('HttpTool', 'Fetching Data...')
-      return formatStreamingData(`\n\n🔧 ${formatToolName} ⏳`, streamId);
+      return formatStreamingData(`\n\n${formatToolName} ⏳`, streamId);
     }
     case 'tool-result': {
       const formatToolName = part.toolName.replace('SchemaDetailsTool', 'Schema Details Fetched')
       .replace('HttpTool', 'Data Fetched')
-      return formatStreamingData(`\n\n✅ ${formatToolName} ✓ \n\n`, streamId);
+      return formatStreamingData(`\n\n ${formatToolName} ✅ \n\n`, streamId);
     }
     default:
       return null;

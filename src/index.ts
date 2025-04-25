@@ -44,13 +44,16 @@ export default {
         token = authHeader.substring(7);
       }
 
-      // If no token, return error
-      if (!token) {
+      // Extract remoteSchemaId from header
+      const remoteSchemaId = request.headers.get('X-Remote-Schema-ID');
+
+      // If no token and no remoteSchemaId, return error
+      if (!token && !remoteSchemaId) {
         return new Response(JSON.stringify({
           error: {
-            message: 'Authentication error: Missing token',
+            message: 'Authentication error: Missing token or remoteSchemaId',
             type: 'authentication_error',
-            code: 'invalid_token'
+            code: 'invalid_parameters'
           }
         }), { 
           status: 401,
@@ -61,19 +64,30 @@ export default {
         });
       }
 
-      // Create a Durable Object ID based on the token
-      const chatId = env.Chat.idFromName(token);
+      // Create a Durable Object ID based on the token or a default ID if only remoteSchemaId is provided
+      const chatId = token 
+        ? env.Chat.idFromName(token)
+        : env.Chat.idFromName(`anonymous-${remoteSchemaId}`);
       
       // Get the Durable Object stub
       const chatDO = env.Chat.get(chatId);
       
-      // Create a new request with custom token header
+      // Create a new request with custom headers
       const newRequest = new Request(request.url, {
         method: request.method,
         headers: request.headers,
         body: request.body
       });
-      newRequest.headers.set('X-Custom-Token', token);
+      
+      // Pass token if available
+      if (token) {
+        newRequest.headers.set('X-Custom-Token', token);
+      }
+      
+      // Pass remoteSchemaId if available
+      if (remoteSchemaId) {
+        newRequest.headers.set('X-Remote-Schema-ID', remoteSchemaId);
+      }
       
       // Forward the request to the Durable Object
       const response = await chatDO.fetch(newRequest);

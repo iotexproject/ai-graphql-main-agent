@@ -75,6 +75,7 @@ export class Chat {
   private session: ChatSession | null = null;
   private agent: Agent | null = null;
   private token: string | null = null;
+  private remoteSchemaId: string | null = null;
 
   constructor(state: DurableObjectState, env: Env) {
     this.storage = state.storage;
@@ -112,12 +113,20 @@ export class Chat {
     }
 
     try {
-      // Check for custom token header
+      // Check for custom token header and remote schema ID
       const customToken = request.headers.get('X-Custom-Token');
+      const remoteSchemaId = request.headers.get('X-Remote-Schema-ID');
+      
       if (customToken) {
         // Use the token from the header
         this.token = customToken;
         console.log('Using custom token from header:', this.token);
+      }
+      
+      if (remoteSchemaId) {
+        // Use the remoteSchemaId from the header
+        this.remoteSchemaId = remoteSchemaId;
+        console.log('Using remote schema ID from header:', this.remoteSchemaId);
       }
       
       // Load session data
@@ -229,19 +238,37 @@ export class Chat {
    */
   private async getRemoteSchemas(): Promise<RemoteSchema[]> {
     try {
-      // 使用KVCache工具类获取数据，无需传递KV命名空间
-      return await KVCache.wrap(
-        MARKETPLACE_CACHE_KEY,
-        async () => {
-          // 当缓存不存在或过期时，此函数会被执行以获取新数据
-          return await this.queryRemoteSchemasFromDB();
-        },
-        {
-          ttl: CACHE_TTL,
-          logHits: true,
-          forceFresh: true
-        }
-      );
+      // 如果指定了remoteSchemaId，直接获取单个Schema
+      if (this.remoteSchemaId) {
+        return await KVCache.wrap(
+          `remoteSchema_${this.remoteSchemaId}`,
+          async () => {
+            const schema = await DB.getRemoteSchemaById(this.remoteSchemaId!);
+            return schema ? [schema] : [];
+          },
+          {
+            ttl: CACHE_TTL,
+            logHits: true
+          }
+        );
+      }
+      
+      // 否则通过token(projectId)获取所有相关Schema
+      if (this.token) {
+        return await KVCache.wrap(
+          `remoteSchemas_project_${this.token}`,
+          async () => {
+            return await this.queryRemoteSchemasFromDB();
+          },
+          {
+            ttl: CACHE_TTL,
+            logHits: true
+          }
+        );
+      }
+      
+      // 如果既没有token也没有remoteSchemaId，返回空数组
+      return [];
     } catch (error) {
       console.error('Error getting remoteSchemas:', error);
       return [];
@@ -254,7 +281,12 @@ export class Chat {
   private async queryRemoteSchemasFromDB(): Promise<RemoteSchema[]> {
     console.log('🔍 Querying remoteSchemas from database...');
     try {
-      const results = await DB.getRemoteSchemasFromProjectId(this.token!) as RemoteSchema[];
+      if (!this.token) {
+        console.log('⚠️ No token available for database query');
+        return [];
+      }
+      
+      const results = await DB.getRemoteSchemasFromProjectId(this.token) as RemoteSchema[];
       // console.log('✅ Database query results:', JSON.stringify(results, null, 2));
       return results;
     } catch (error) {
@@ -466,11 +498,21 @@ export class Chat {
 1. 首先使用SchemaDetailsTool获取GraphQL schema信息，提供marketPlaceId(必填)和需要的queryFields字段名称数组\n
 2. 分析返回的schema信息，了解查询字段的参数类型和返回类型\n
 3. 根据schema信息正确构建GraphQL查询参数和查询语句\n
-4. 使用HttpTool发送请求到相应的endpoint执行查询\n\n
-5. 每个HttpTool请求必须带上headers: { 'x-project-id': ${this.token} }\n
+4. 使用HttpTool发送请求到相应的endpoint执行查询\n\n`;
+      let headersInfo = '5. 每个HttpTool请求必须带上以下headers: { ';
+      if (this.remoteSchemaId) {
+        headersInfo += `'x-remote-schema-id': '${this.remoteSchemaId}'`;
+      }
+      if (this.token) {
+        if (this.remoteSchemaId) headersInfo += ', ';
+        headersInfo += `'x-project-id': '${this.token}'`;
+      }
+      headersInfo += ' }\n';
+      remoteSchemasInfo += headersInfo;
+      remoteSchemasInfo += `
 这个流程非常重要，因为没有正确的schema信息，你将无法知道GraphQL查询需要什么输入参数以及会返回什么输出结构。`;
     }
-    console.log(remoteSchemasInfo, 'remoteSchemasInfo')
+    
     // 组合最终的系统提示
     return `${baseSystemPrompt}${remoteSchemasInfo}${userSystemPrompt ? '\n\n' + userSystemPrompt : ''}`;
   }

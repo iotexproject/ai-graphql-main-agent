@@ -44,14 +44,14 @@ export default {
         token = authHeader.substring(7);
       }
 
-      // Extract remoteSchemaId from header
-      const remoteSchemaId = request.headers.get('X-Remote-Schema-ID');
+      // Extract marketplaceId from header
+      const marketplaceId = request.headers.get('X-Marketplace-ID');
 
-      // If no token and no remoteSchemaId, return error
-      if (!token && !remoteSchemaId) {
+      // If no token and no marketplaceId, return error
+      if (!token && !marketplaceId) {
         return new Response(JSON.stringify({
           error: {
-            message: 'Authentication error: Missing token or remoteSchemaId',
+            message: 'Authentication error: Missing token or marketplaceId',
             type: 'authentication_error',
             code: 'invalid_parameters'
           }
@@ -64,10 +64,10 @@ export default {
         });
       }
 
-      // Create a Durable Object ID based on the token or a default ID if only remoteSchemaId is provided
+      // Create a Durable Object ID based on the token or a default ID if only marketplaceId is provided
       const chatId = token 
         ? env.Chat.idFromName(token)
-        : env.Chat.idFromName(`anonymous-${remoteSchemaId}`);
+        : env.Chat.idFromName(`anonymous-${marketplaceId}`);
       
       // Get the Durable Object stub
       const chatDO = env.Chat.get(chatId);
@@ -84,9 +84,9 @@ export default {
         newRequest.headers.set('X-Custom-Token', token);
       }
       
-      // Pass remoteSchemaId if available
-      if (remoteSchemaId) {
-        newRequest.headers.set('X-Remote-Schema-ID', remoteSchemaId);
+      // Pass marketplaceId if available
+      if (marketplaceId) {
+        newRequest.headers.set('X-Marketplace-ID', marketplaceId);
       }
       
       // Forward the request to the Durable Object

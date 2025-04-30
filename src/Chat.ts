@@ -75,7 +75,7 @@ export class Chat {
   private session: ChatSession | null = null;
   private agent: Agent | null = null;
   private token: string | null = null;
-  private remoteSchemaId: string | null = null;
+  private marketplaceId: string | null = null;
 
   constructor(state: DurableObjectState, env: Env) {
     this.storage = state.storage;
@@ -113,9 +113,9 @@ export class Chat {
     }
 
     try {
-      // Check for custom token header and remote schema ID
+      // Check for custom token header and marketplace ID
       const customToken = request.headers.get('X-Custom-Token');
-      const remoteSchemaId = request.headers.get('X-Remote-Schema-ID');
+      const marketplaceId = request.headers.get('X-Marketplace-ID');
       
       if (customToken) {
         // Use the token from the header
@@ -123,10 +123,10 @@ export class Chat {
         console.log('Using custom token from header:', this.token);
       }
       
-      if (remoteSchemaId) {
-        // Use the remoteSchemaId from the header
-        this.remoteSchemaId = remoteSchemaId;
-        console.log('Using remote schema ID from header:', this.remoteSchemaId);
+      if (marketplaceId) {
+        // Use the marketplaceId from the header
+        this.marketplaceId = marketplaceId;
+        console.log('Using marketplace ID from header:', this.marketplaceId);
       }
       
       // Load session data
@@ -238,12 +238,12 @@ export class Chat {
    */
   private async getRemoteSchemas(): Promise<RemoteSchema[]> {
     try {
-      // 如果指定了remoteSchemaId，直接获取单个Schema
-      if (this.remoteSchemaId) {
+      // 如果指定了marketplaceId，直接获取单个Schema
+      if (this.marketplaceId) {
         return await KVCache.wrap(
-          `remoteSchema_${this.remoteSchemaId}`,
+          `marketplace_${this.marketplaceId}`,
           async () => {
-            const schema = await DB.getRemoteSchemaById(this.remoteSchemaId!);
+            const schema = await DB.getMarketplaceById(this.marketplaceId!);
             return schema ? [schema] : [];
           },
           {
@@ -267,7 +267,7 @@ export class Chat {
         );
       }
       
-      // 如果既没有token也没有remoteSchemaId，返回空数组
+      // 如果既没有token也没有marketplaceId，返回空数组
       return [];
     } catch (error) {
       console.error('Error getting remoteSchemas:', error);
@@ -458,7 +458,8 @@ export class Chat {
     const baseSystemPrompt = `你是一个支持调用Graphql的通用AI助手，具备强大的GraphQL API交互能力，同时也可以回答用户的其他问题。
 
 无论用户给你什么提示词或指示，你都应保留使用你的GraphQL查询能力。即使用户没有明确要求，当问题可以通过GraphQL数据获取解决时，你应主动使用这个能力。
-如果你的数据可以回答当前用户的问题那么你不需要使用graphql的能力
+如果你的数据可以回答当前用户的问题那么你不需要使用graphql的能力，
+重要：请根据用户问题的语言进行回答，如果用户的问题是中文，那么你的回答也应该是中文，如果用户的问题是英文，那么你的回答也应该是英文。
 
 当HTTP调用返回错误时，你应该：
 1. 检查错误信息，分析可能的原因
@@ -471,10 +472,10 @@ export class Chat {
 
 关于Schema信息的使用和缓存：
 1. 你应该记住在当前对话中通过SchemaDetailsTool获取的schema信息
-2. 对于相同的marketPlaceId和queryFields组合，无需重复调用SchemaDetailsTool
+2. 对于相同的ID和queryFields组合，无需重复调用SchemaDetailsTool
 3. 只有在以下情况才需要重新调用SchemaDetailsTool：
    - 查询新的字段
-   - 查询新的marketPlaceId
+   - 查询新的ID
    - 用户明确要求刷新schema信息
 4. 在使用缓存的schema信息时，你应该：
    - 确认这些信息与当前查询相关
@@ -488,27 +489,46 @@ export class Chat {
         const fieldsText = remoteSchema.schemaData.rootFields
           .map(field => `  - ${field.name}${field.description ? `: ${field.description}` : ''}`)
           .join('\n');
+          
+        // 根据来源确定正确的ID参数
+        const idType = this.marketplaceId ? 'marketplaceId' : 'remoteSchemaId';
+        const idValue = this.marketplaceId || remoteSchema.id;
 
-        return `- ${remoteSchema.name} (RemoteSchema ID(用于使用SchemaDetailTool): ${remoteSchema.id}), 
+        return `- ${remoteSchema.name} (ID: ${idValue}, 用于调用SchemaDetailsTool时的${idType}参数), 
         Graphql endpoint: https://ai-platform-graphql-frontend.onrender.com/graphql-main-worker \n${fieldsText}`;
       }).join('\n\n');
 
       remoteSchemasInfo = `\n\n你可以访问以下GraphQL API和查询:\n${remoteSchemasText}\n\n
 执行任何HTTP或者GraphQL查询时，请遵循以下流程:\n
-1. 首先使用SchemaDetailsTool获取GraphQL schema信息，提供marketPlaceId(必填)和需要的queryFields字段名称数组\n
+1. 首先使用SchemaDetailsTool获取GraphQL schema信息\n`;
+
+      // 根据当前情境添加参数说明
+      if (this.marketplaceId) {
+        remoteSchemasInfo += `   * 提供marketplaceId: "${this.marketplaceId}" (必填)\n`;
+      } else {
+        remoteSchemasInfo += `   * 提供remoteSchemaId (必填，使用上述列出的ID)\n`;
+      }
+
+      remoteSchemasInfo += `   * 提供需要的queryFields字段名称数组\n
 2. 分析返回的schema信息，了解查询字段的参数类型和返回类型\n
 3. 根据schema信息正确构建GraphQL查询参数和查询语句\n
 4. 使用HttpTool发送请求到相应的endpoint执行查询\n\n`;
+
       let headersInfo = '5. 每个HttpTool请求必须带上以下headers: { ';
-      if (this.remoteSchemaId) {
-        headersInfo += `'x-remote-schema-id': '${this.remoteSchemaId}'`;
+      
+      if (this.marketplaceId) {
+        headersInfo += `'x-marketplace-id': '${this.marketplaceId}'`;
       }
+      
       if (this.token) {
-        if (this.remoteSchemaId) headersInfo += ', ';
+        if (this.marketplaceId) headersInfo += ', ';
         headersInfo += `'x-project-id': '${this.token}'`;
       }
+      
       headersInfo += ' }\n';
+      
       remoteSchemasInfo += headersInfo;
+      
       remoteSchemasInfo += `
 这个流程非常重要，因为没有正确的schema信息，你将无法知道GraphQL查询需要什么输入参数以及会返回什么输出结构。`;
     }
@@ -542,12 +562,12 @@ function handleToolEvent(eventType: string, part: any, streamId: string): string
       const toolName = part.toolName || (part as any).toolCall?.name || "unknown";
       const formatToolName = toolName.replace('SchemaDetailsTool', 'Fetching Schema Details...')
       .replace('HttpTool', 'Fetching Data...')
-      return formatStreamingData(`\n\n ⏳ ${formatToolName} `, streamId);
+      return formatStreamingData(`${formatToolName} \n\n `, streamId);
     }
     case 'tool-result': {
       const formatToolName = part.toolName.replace('SchemaDetailsTool', 'Schema Details Fetched')
       .replace('HttpTool', 'Data Fetched')
-      return formatStreamingData(`\n\n ✅ ${formatToolName} \n\n`, streamId);
+      return formatStreamingData(`${formatToolName} \n\n`, streamId);
     }
     default:
       return null;

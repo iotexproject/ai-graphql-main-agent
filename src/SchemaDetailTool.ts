@@ -43,48 +43,52 @@ interface GraphQLIntrospectionResponse {
   }>;
 }
 
-// 缓存TTL常量（秒）
-// const CACHE_TTL = 3600; // 1小时
 const CACHE_TTL = 10; // 10秒
 
 export const SchemaDetailsTool = createTool({
   id: "schema-details",
-  description: "Fetch GraphQL schema details for a specific remote schema",
+  description: "Fetch GraphQL schema details for a specific schema",
   inputSchema: z.object({
-    remoteSchemaId: z.string().describe("The remoteschema ID to fetch schema details for"),
+    remoteSchemaId: z.string().optional().describe("The remoteSchema ID to fetch schema details for"),
+    marketplaceId: z.string().optional().describe("The marketplace ID to fetch schema details for"),
     queryFields: z.array(z.string()).optional().describe("List of field names to get details for (can be query or mutation fields)"),
     mutationFields: z.array(z.string()).optional().describe("List of mutation field names to get details for (deprecated, use queryFields for both)"),
+  }).refine(data => data.remoteSchemaId || data.marketplaceId, {
+    message: "Either remoteSchemaId or marketplaceId must be provided",
+    path: ["remoteSchemaId"]
   }),
   execute: async ({ context }) => {
     console.log('SchemaDetailsTool execute', context);
     try {
-      // 从context获取参数
-      const { remoteSchemaId, queryFields = [], mutationFields = [] } = context;
+      const { remoteSchemaId, marketplaceId, queryFields = [], mutationFields = [] } = context;
       
-      // 合并字段查询，使queryFields可以查询两种类型
       const allFields = [...new Set([...queryFields, ...mutationFields])];
       
-      // 缓存键，基于remoteSchemaId和所有字段
-      const cacheKey = `schema_remote_${remoteSchemaId}_fields_${allFields.join(',')}`;
+      const sourceType = marketplaceId ? 'marketplace' : 'remoteSchema';
+      const sourceId = marketplaceId || remoteSchemaId;
       
-      // 使用KVCache.wrap获取schema数据
+      const cacheKey = `schema_${sourceType}_${sourceId}_fields_${allFields.join(',')}`;
+      
       const schemaData = await KVCache.wrap(
         cacheKey,
         async () => {
-          console.log(`Fetching schema for remote schema ID: ${remoteSchemaId}`);
+          console.log(`Fetching schema for ${sourceType} ID: ${sourceId}`);
           
-          // 从数据库获取marketplace
-          const dbResult = await DB.getRemoteSchemaById(remoteSchemaId);
+          let dbResult;
+          if (sourceType === 'marketplace') {
+            dbResult = await DB.getMarketplaceById(sourceId as string);
+          } else {
+            dbResult = await DB.getRemoteSchemaById(sourceId as string);
+          }
+          
           if (!dbResult) {
-            throw new Error(`Marketplace with ID ${remoteSchemaId} not found`);
+            throw new Error(`${sourceType} with ID ${sourceId} not found`);
           }
           
-          // 从marketplace中获取schema
           if (!dbResult.schemaData || !dbResult.schemaData.rawSchema) {
-            throw new Error(`No schema data found for marketplace ${dbResult.name}`);
+            throw new Error(`No schema data found for ${sourceType} ${dbResult.name}`);
           }
           
-          // 返回marketplace中的schemaData
           return dbResult.schemaData.rawSchema;
         },
         {
@@ -105,27 +109,15 @@ export const SchemaDetailsTool = createTool({
         hasTypes: !!schemaData.types,
       });
       
-      // 提取查询和变更字段的schema信息
       const queryResult = extractSchemaForQueries(schemaData, allFields);
       const mutationResult = extractSchemaForMutations(schemaData, allFields);
       
-      // 增强结果数据 - 处理union类型
       enhanceResultsWithUnionTypes(schemaData, queryResult, mutationResult);
-      
-      console.log('查询结果:', {
-        queryCount: queryResult.queries.length,
-        queryTypeCount: Object.keys(queryResult.queryTypes).length
-      });
-      
-      console.log('变更结果:', {
-        mutations: mutationResult.mutations,
-        mutationTypes: JSON.stringify(mutationResult.mutationTypes)
-      });
-      
       return {
         success: true,
         data: {
-          remoteSchemaId,
+          sourceType,
+          sourceId,
           queries: queryResult.queries,
           queryTypes: queryResult.queryTypes,
           mutations: mutationResult.mutations,
@@ -499,28 +491,21 @@ function extractTypeDetails(
   result[typeName] = extractedType;
 }
 
-/**
- * 增强结果数据，处理Union类型，添加可能类型及其字段信息
- */
 function enhanceResultsWithUnionTypes(schema: any, queryResult: any, mutationResult: any) {
-  // 获取所有返回类型
   const allReturnTypes = [
     ...queryResult.queries.map((q: any) => q.type),
     ...mutationResult.mutations.map((m: any) => m.type)
   ];
   
-  // 查找UNION类型
   const unionTypes = schema.types.filter((type: any) => 
     type.kind === 'UNION' && allReturnTypes.includes(type.name)
   );
   
   console.log('Found union types:', unionTypes.map((t: any) => t.name));
   
-  // 处理每个UNION类型
   for (const unionType of unionTypes) {
     const unionTypeName = unionType.name;
     
-    // 在queryTypes和mutationTypes中查找并增强包含该union类型的字段
     for (const [key, value] of Object.entries(queryResult.queryTypes)) {
       if ((value as any).returnType === unionTypeName) {
         (value as any).returnTypeKind = 'UNION';
@@ -529,7 +514,6 @@ function enhanceResultsWithUnionTypes(schema: any, queryResult: any, mutationRes
           kind: pt.kind || 'OBJECT'
         }));
         
-        // 添加可能类型的字段信息
         (value as any).possibleTypeFields = {};
         for (const pt of unionType.possibleTypes || []) {
           const possibleType = schema.types.find((t: any) => t.name === pt.name);
@@ -552,7 +536,6 @@ function enhanceResultsWithUnionTypes(schema: any, queryResult: any, mutationRes
           kind: pt.kind || 'OBJECT'
         }));
         
-        // 添加可能类型的字段信息
         (value as any).possibleTypeFields = {};
         for (const pt of unionType.possibleTypes || []) {
           const possibleType = schema.types.find((t: any) => t.name === pt.name);

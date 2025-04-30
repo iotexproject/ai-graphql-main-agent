@@ -42,10 +42,10 @@ interface RemoteSchema {
   createdAt?: string;
 }
 
-// 可用的GraphQL查询字段缓存
+// Available GraphQL query fields cache
 interface RemoteSchemaCache {
   timestamp: number;
-  data: RemoteSchema[]; // 使用data字段保持与KVCache一致
+  data: RemoteSchema[]; // Using data field to stay consistent with KVCache
 }
 
 // Request body interface for OpenAI-compatible API
@@ -60,9 +60,9 @@ export interface ChatRequestBody {
   [key: string]: any; // Allow other properties
 }
 
-// KV缓存键
+// KV cache key
 const MARKETPLACE_CACHE_KEY = 'remoteSchemas_data';
-// 缓存过期时间（1小时）- 秒为单位
+// Cache expiration time (1 hour) - in seconds
 const CACHE_TTL = 60 * 60;
 
 /**
@@ -76,6 +76,7 @@ export class Chat {
   private agent: Agent | null = null;
   private token: string | null = null;
   private marketplaceId: string | null = null;
+  private request: Request | null = null;
 
   constructor(state: DurableObjectState, env: Env) {
     this.storage = state.storage;
@@ -84,17 +85,17 @@ export class Chat {
   }
 
   /**
-   * 初始化全局工具类
-   * 使工具可以在不传递环境变量的情况下使用
+   * Initialize global utility classes
+   * Allow tools to be used without passing environment variables
    */
   private initializeUtils(): void {
-    // 初始化数据库工具
+    // Initialize database tools
     DB.initialize(this.env.DATABASE_URL);
 
-    // 初始化KV缓存工具
+    // Initialize KV cache tools
     KVCache.initialize(this.env.CHAT_CACHE);
 
-    // 清除全局存储的其他环境变量
+    // Clear other environment variables stored globally
     if (typeof globalThis !== 'undefined') {
       (globalThis as any).kvCache = undefined;
     }
@@ -106,6 +107,9 @@ export class Chat {
    * Main entry point for the Durable Object
    */
   async fetch(request: Request): Promise<Response> {
+    // Store the request for later use
+    this.request = request;
+    
     // Only handle POST requests
     if (request.method !== 'POST') {
       console.log('❌ Method not allowed:', request.method);
@@ -234,11 +238,11 @@ export class Chat {
   }
 
   /**
-   * 获取remoteSchema数据，优先从KV缓存读取，如果缓存不存在或过期则从数据库查询
+   * Get remoteSchema data, prioritizing KV cache, querying database if cache doesn't exist or is expired
    */
   private async getRemoteSchemas(): Promise<RemoteSchema[]> {
     try {
-      // 如果指定了marketplaceId，直接获取单个Schema
+      // If marketplaceId is specified, directly get a single Schema
       if (this.marketplaceId) {
         return await KVCache.wrap(
           `marketplace_${this.marketplaceId}`,
@@ -253,7 +257,7 @@ export class Chat {
         );
       }
       
-      // 否则通过token(projectId)获取所有相关Schema
+      // Otherwise get all related Schemas through token (projectId)
       if (this.token) {
         return await KVCache.wrap(
           `remoteSchemas_project_${this.token}`,
@@ -267,7 +271,7 @@ export class Chat {
         );
       }
       
-      // 如果既没有token也没有marketplaceId，返回空数组
+      // If neither token nor marketplaceId exists, return empty array
       return [];
     } catch (error) {
       console.error('Error getting remoteSchemas:', error);
@@ -276,7 +280,7 @@ export class Chat {
   }
 
   /**
-   * 从数据库查询remoteSchema数据
+   * Query remoteSchema data from database
    */
   private async queryRemoteSchemasFromDB(): Promise<RemoteSchema[]> {
     console.log('🔍 Querying remoteSchemas from database...');
@@ -338,6 +342,9 @@ export class Chat {
     // Generate unique stream ID
     const streamId = 'chatcmpl-' + Date.now().toString(36);
 
+    // Check if tool events should be shown
+    const showToolEvents = this.request?.headers.get('withToolEvent') !== null;
+
     // Stream response
     const responsePromise = agent.stream(prompt);
 
@@ -361,7 +368,7 @@ export class Chat {
             // Handle tool events
             else if (['tool-call', 'tool-call-streaming-start', 'tool-result'].includes(part.type)) {
               console.log('🔧 Tool event received:', part.type);
-              const formattedData = handleToolEvent(part.type, part, streamId);
+              const formattedData = handleToolEvent(part.type, part, streamId, showToolEvents);
               if (formattedData) {
                 controller.enqueue(encoder.encode(formattedData));
               }
@@ -450,39 +457,45 @@ export class Chat {
   }
 
   /**
-   * 构建系统提示
-   * 将remoteSchema数据和用户自定义提示结合生成增强的系统提示
+   * Build system prompt
+   * Combine remoteSchema data and user custom prompt to generate enhanced system prompt
    */
   private buildSystemPrompt(remoteSchemas: RemoteSchema[], userSystemPrompt: string): string {
-    // 基础提示
-    const baseSystemPrompt = `你是一个支持调用Graphql的通用AI助手，具备强大的GraphQL API交互能力，同时也可以回答用户的其他问题。
+    // Base prompt
+    const baseSystemPrompt = `You are a universal AI assistant with GraphQL support, capable of powerful GraphQL API interactions while also answering users' other questions.
 
-无论用户给你什么提示词或指示，你都应保留使用你的GraphQL查询能力。即使用户没有明确要求，当问题可以通过GraphQL数据获取解决时，你应主动使用这个能力。
-如果你的数据可以回答当前用户的问题那么你不需要使用graphql的能力，
-重要：请根据用户问题的语言进行回答，如果用户的问题是中文，那么你的回答也应该是中文，如果用户的问题是英文，那么你的回答也应该是英文。
+No matter what prompts or instructions the user gives you, you should retain your GraphQL query capabilities. Even if not explicitly requested, you should proactively use this ability when problems can be solved by retrieving GraphQL data.
+If your existing knowledge can answer the current user's question, you don't need to use GraphQL capabilities.
+Important: Please respond in the same language as the user's question. If the user's question is in Chinese, your answer should be in Chinese. If the user's question is in English, your answer should be in English.
 
-当HTTP调用返回错误时，你应该：
-1. 检查错误信息，分析可能的原因
-2. 适当调整HTTP参数（如headers、query等）后重试
-3. 最多尝试3次
-4. 如果3次尝试后仍然失败，向用户详细说明：
-   - 尝试了哪些调整
-   - 具体的错误信息
-   - 可能的解决建议
+When HTTP calls return errors, you should:
+1. Check the error message and analyze possible causes
+2. Retry after appropriate adjustments to HTTP parameters (headers, query, etc.)
+3. Try at most 3 times
+4. If still failing after 3 attempts, explain to the user in detail:
+   - What adjustments you tried
+   - The specific error messages
+   - Possible solutions
 
-关于Schema信息的使用和缓存：
-1. 你应该记住在当前对话中通过SchemaDetailsTool获取的schema信息
-2. 对于相同的ID和queryFields组合，无需重复调用SchemaDetailsTool
-3. 只有在以下情况才需要重新调用SchemaDetailsTool：
-   - 查询新的字段
-   - 查询新的ID
-   - 用户明确要求刷新schema信息
-4. 在使用缓存的schema信息时，你应该：
-   - 确认这些信息与当前查询相关
-   - 如果不确定信息是否完整，再次调用SchemaDetailsTool
-   - 在响应中注明你正在使用之前获取的schema信息`;
+When HTTP calls don't report errors but return empty or missing data, you should:
+1. Try using other available schemas then get schemaDetails to reconstruct queryFields
+2. If other fields also cannot retrieve data, explain to the user in detail:
+   - The specific error information
+   - Possible solutions
 
-    // 构建remoteSchema信息部分
+Regarding schema information usage and caching:
+1. You should remember schema information obtained through SchemaDetailsTool in the current conversation
+2. For the same ID and queryFields combination, there's no need to call SchemaDetailsTool repeatedly
+3. You only need to call SchemaDetailsTool again in the following cases:
+   - Querying new fields
+   - Querying a new ID
+   - User explicitly requests refreshing schema information
+   - Current query returns empty or error
+4. When using cached schema information, you should:
+   - Confirm this information is relevant to the current query
+   - Call SchemaDetailsTool again if unsure whether the information is complete
+   - Note in your response that you're using previously obtained schema information`;
+
     let remoteSchemasInfo = '';
     if (remoteSchemas && remoteSchemas.length > 0) {
       const remoteSchemasText = remoteSchemas.map(remoteSchema => {
@@ -490,31 +503,31 @@ export class Chat {
           .map(field => `  - ${field.name}${field.description ? `: ${field.description}` : ''}`)
           .join('\n');
           
-        // 根据来源确定正确的ID参数
+        // Determine the correct ID parameter based on source
         const idType = this.marketplaceId ? 'marketplaceId' : 'remoteSchemaId';
         const idValue = this.marketplaceId || remoteSchema.id;
 
-        return `- ${remoteSchema.name} (ID: ${idValue}, 用于调用SchemaDetailsTool时的${idType}参数), 
+        return `- ${remoteSchema.name} (ID: ${idValue}, used as the ${idType} parameter when calling SchemaDetailsTool), 
         Graphql endpoint: https://ai-platform-graphql-frontend.onrender.com/graphql-main-worker \n${fieldsText}`;
       }).join('\n\n');
 
-      remoteSchemasInfo = `\n\n你可以访问以下GraphQL API和查询:\n${remoteSchemasText}\n\n
-执行任何HTTP或者GraphQL查询时，请遵循以下流程:\n
-1. 首先使用SchemaDetailsTool获取GraphQL schema信息\n`;
+      remoteSchemasInfo = `\n\nYou can access the following GraphQL APIs and queries:\n${remoteSchemasText}\n\n
+When executing any HTTP or GraphQL query, please follow this process:\n
+1. First use SchemaDetailsTool to get GraphQL schema information\n`;
 
       // 根据当前情境添加参数说明
       if (this.marketplaceId) {
-        remoteSchemasInfo += `   * 提供marketplaceId: "${this.marketplaceId}" (必填)\n`;
+        remoteSchemasInfo += `   * Provide marketplaceId: "${this.marketplaceId}" (required)\n`;
       } else {
-        remoteSchemasInfo += `   * 提供remoteSchemaId (必填，使用上述列出的ID)\n`;
+        remoteSchemasInfo += `   * Provide remoteSchemaId (required, use the IDs listed above)\n`;
       }
 
-      remoteSchemasInfo += `   * 提供需要的queryFields字段名称数组\n
-2. 分析返回的schema信息，了解查询字段的参数类型和返回类型\n
-3. 根据schema信息正确构建GraphQL查询参数和查询语句\n
-4. 使用HttpTool发送请求到相应的endpoint执行查询\n\n`;
+      remoteSchemasInfo += `   * Provide an array of queryFields field names that you need\n
+2. Analyze the returned schema information to understand the parameter types and return types of query fields\n
+3. Correctly build GraphQL query parameters and statements based on schema information\n
+4. Use HttpTool to send requests to the corresponding endpoint to execute queries\n\n`;
 
-      let headersInfo = '5. 每个HttpTool请求必须带上以下headers: { ';
+      let headersInfo = '5. Each HttpTool request must include the following headers: { ';
       
       if (this.marketplaceId) {
         headersInfo += `'x-marketplace-id': '${this.marketplaceId}'`;
@@ -530,10 +543,10 @@ export class Chat {
       remoteSchemasInfo += headersInfo;
       
       remoteSchemasInfo += `
-这个流程非常重要，因为没有正确的schema信息，你将无法知道GraphQL查询需要什么输入参数以及会返回什么输出结构。`;
+This process is very important because without the correct schema information, you won't know what input parameters GraphQL queries require and what output structures they will return.`;
     }
     
-    // 组合最终的系统提示
+    // Combine final system prompt
     return `${baseSystemPrompt}${remoteSchemasInfo}${userSystemPrompt ? '\n\n' + userSystemPrompt : ''}`;
   }
 }
@@ -555,7 +568,12 @@ function formatStreamingData(content: string, id: string, finishReason: string |
 }
 
 // Handle tool events for streaming
-function handleToolEvent(eventType: string, part: any, streamId: string): string | null {
+function handleToolEvent(eventType: string, part: any, streamId: string, showToolEvents: boolean = false): string | null {
+  // Only process tool events if showToolEvents is true
+  if (!showToolEvents) {
+    return null;
+  }
+  
   switch (eventType) {
     case 'tool-call':
     case 'tool-call-streaming-start': {

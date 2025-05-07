@@ -8,11 +8,14 @@ compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
 name = "Chat"
 class_name = "Chat"
 
+[[durable_objects.bindings]]
+name = "MCP_OBJECT"
+class_name = "MyMCP"
+
 # Durable Objects迁移
 [[migrations]]
-tag = "v1"
-new_sqlite_classes = ["Chat"]
-
+tag = "v2"
+new_sqlite_classes = ["MyMCP"]
 
 # KV绑定 - 用于缓存marketplace数据
 [[kv_namespaces]]

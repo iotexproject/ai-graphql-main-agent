@@ -6,7 +6,10 @@ import type { ChatRequestBody, Message } from "./Chat";
 import { Chat } from "./Chat";
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { z } from "zod";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 // Re-export the Chat class for Durable Objects
 export { Chat };
 
@@ -14,7 +17,7 @@ export { Chat };
 type Bindings = Env;
 
 type Props = {
-	bearerToken: string;
+  bearerToken: string;
 };
 
 type State = null;
@@ -40,38 +43,71 @@ app.use('*', cors({
 }));
 
 export class MyMCP extends McpAgent<Bindings, State, Props> {
-	server = new McpServer({
-		name: "Demo",
-		version: "1.0.0",
-	});
+  server = new Server({
+    name: "Demo",
+    version: "1.0.0"
+  }, {
+    capabilities: {
+      tools: {},
+    },
+  });
 
-	async init() {
-		this.server.tool("add", { a: z.number(), b: z.number() }, async ({ a, b }) => ({
-			content: [{ type: "text", text: String(a + b) }],
-		}));
+  async init() {
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+      return {
+        tools: [
+          {
+            name: "add",
+            description: "计算两个数字的和",
+            inputSchema: {
+              type: "object",
+              properties: {
+                a: {
+                  type: "number",
+                  description: "第一个数字",
+                },
+                b: {
+                  type: "number",
+                  description: "第二个数字",
+                },
+              },
+              required: ["a", "b"],
+            },
+          },
+        ],
+      };
+    });
 
-		// Tool that returns the user's bearer token
-		// This is just for demonstration purposes, don't actually create a tool that does this!
-		this.server.tool("getToken", {}, async () => ({
-			content: [{ type: "text", text: String(`User's token: ${this.props.bearerToken}`) }],
-		}));
-	}
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      console.log(request.params);
+      switch (request.params.name) {
+        case "add":
+          return {
+            content: [{ type: "text", text: String(request.params.arguments.a + request.params.arguments.b) }],
+          };
+        default:
+          return {
+            content: [{ type: "text", text: "工具不存在" }],
+          };
+      }
+    });
+  }
 }
 
 
 app.mount("/", (req, env, ctx) => {
-	// This could technically be pulled out into a middleware function, but is left here for clarity
-	// const authHeader = req.headers.get("authorization");
-	// if (!authHeader) {
-	// 	return new Response("Unauthorized", { status: 401 });
-	// }
+  // This could technically be pulled out into a middleware function, but is left here for clarity
+  // const authHeader = req.headers.get("authorization");
+  // if (!authHeader) {
+  // 	return new Response("Unauthorized", { status: 401 });
+  // }
 
-	// ctx.props = {
-	// 	bearerToken: authHeader,
-	// 	// could also add arbitrary headers/parameters here to pass into the MCP client
-	// };
+  // ctx.props = {
+  // 	bearerToken: authHeader,
+  // 	// could also add arbitrary headers/parameters here to pass into the MCP client
+  // };
 
-	return MyMCP.mount("/sse").fetch(req, env, ctx);
+  return MyMCP.mount("/sse").fetch(req, env, ctx);
 });
 // Chat endpoint
 app.post('/v1/chat/completions', async (c) => {
@@ -79,7 +115,7 @@ app.post('/v1/chat/completions', async (c) => {
     // Extract token from Authorization header
     const authHeader = c.req.header('Authorization') || '';
     let token = '';
-    
+
     if (authHeader.startsWith('Bearer ')) {
       token = authHeader.substring(7);
     }
@@ -99,33 +135,33 @@ app.post('/v1/chat/completions', async (c) => {
     }
 
     // Create a Durable Object ID based on the token or a default ID if only marketplaceId is provided
-    const chatId = token 
+    const chatId = token
       ? c.env.Chat.idFromName(token)
       : c.env.Chat.idFromName(`anonymous-${marketplaceId}`);
-    
+
     // Get the Durable Object stub
     const chatDO = c.env.Chat.get(chatId);
-    
+
     // Create a new request with custom headers
     const newRequest = new Request(c.req.url, {
       method: c.req.method,
       headers: c.req.raw.headers,
       body: c.req.raw.body
     });
-    
+
     // Pass token if available
     if (token) {
       newRequest.headers.set('X-Custom-Token', token);
     }
-    
+
     // Pass marketplaceId if available
     if (marketplaceId) {
       newRequest.headers.set('X-Marketplace-ID', marketplaceId);
     }
-    
+
     // Forward the request to the Durable Object
     const response = await chatDO.fetch(newRequest);
-    
+
     // Return the response from the Durable Object
     return new Response(response.body, response);
   } catch (error) {

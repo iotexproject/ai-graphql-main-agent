@@ -5,11 +5,14 @@ import { cors } from 'hono/cors';
 import type { ChatRequestBody, Message } from "./Chat";
 import { Chat } from "./Chat";
 import { McpAgent } from "agents/mcp";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { z } from "zod";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { KVCache } from "./utils/kv";
+import { DB } from "./utils/db";
+import axios from 'axios';
+import { getFullTypeName, isNonNullType, handleHttpRequest, handleSchemaDetails, getSchemaByMarketplaceId, getSchemasByToken, handleListSchemas } from "./utils/tool-handlers";
 // Re-export the Chat class for Durable Objects
 export { Chat };
 
@@ -18,6 +21,7 @@ type Bindings = Env;
 
 type Props = {
   bearerToken: string;
+  marketplaceId?: string;
 };
 
 type State = null;
@@ -31,6 +35,49 @@ interface Env {
   Chat: DurableObjectNamespace;
 }
 
+// Remote Schema interface
+interface RemoteSchema {
+  id: string;
+  name: string;
+  description?: string;
+  endpoint: string;
+  headers: Record<string, string>;
+  schemaData: {
+    rootFields: {
+      name: string;
+      description?: string;
+    }[];
+    rawSchema: any;
+  };
+  createdAt?: string;
+}
+
+// Chat响应接口
+interface ChatResponse {
+  id: string;
+  object: string;
+  created: number;
+  model: string;
+  choices?: Array<{
+    index: number;
+    message?: {
+      role: string;
+      content: string;
+    };
+    finish_reason?: string;
+  }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+  error?: {
+    message: string;
+    type: string;
+    code: string;
+  };
+}
+
 // Create Hono app
 const app = new Hono<{ Bindings: Env }>();
 
@@ -41,6 +88,7 @@ app.use('*', cors({
   allowHeaders: ['Content-Type', 'Authorization', 'X-Marketplace-ID'],
   maxAge: 86400,
 }));
+
 
 export class MyMCP extends McpAgent<Bindings, State, Props> {
   server = new Server({
@@ -53,38 +101,199 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
   });
 
   async init() {
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+    this.server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+      console.log(this.props.bearerToken);
+      const token = this.props.bearerToken || "";
+      const marketplaceId = this.props.marketplaceId || "";
+      
+      if (!token && !marketplaceId) {
+        throw new Error("Missing token or marketplaceId");
+      }
+      
+      // 使用通用函数处理Schema列表
+      const result = await handleListSchemas({
+        token,
+        marketplaceId,
+        forDescription: true,
+        env: this.env
+      });
+      
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+
       return {
         tools: [
           {
-            name: "add",
-            description: "计算两个数字的和",
+            name: "list_schemas",
+            description: `${result.remoteSchemasInfo}.再调用任何工具之前，请先调用list_schemas工具获取Schema列表。
+            如果在会话中已经知道了Schema列表，请直接调用schema_details工具获取详细信息。
+            用户询问此MCP服务的功能，请直接返回list_schemas工具的描述信息。`,
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
+          {
+            name: "schema_details",
+            description: "Get detailed information about GraphQL schema fields, including arguments, input and output types",
             inputSchema: {
               type: "object",
               properties: {
-                a: {
-                  type: "number",
-                  description: "第一个数字",
+                remoteSchemaId: {
+                  type: "string",
+                  description: "The remoteSchema ID to fetch schema details for (use this OR marketplaceId)",
                 },
-                b: {
-                  type: "number",
-                  description: "第二个数字",
+                marketplaceId: {
+                  type: "string",
+                  description: "The marketplace ID to fetch schema details for (use this OR remoteSchemaId)",
                 },
+                queryFields: {
+                  type: "array",
+                  items: {
+                    type: "string"
+                  },
+                  description: "List of field names to get details for (can be query or mutation fields)",
+                }
               },
-              required: ["a", "b"],
+              required: ["queryFields"],
             },
           },
-        ],
+          {
+            name: "http_request",
+            description: "Send HTTP requests to external APIs, including GraphQL endpoints",
+            inputSchema: {
+              type: "object",
+              properties: {
+                url: {
+                  type: "string",
+                  description: "The URL to make the request to",
+                },
+                method: {
+                  type: "string",
+                  enum: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+                  description: "The HTTP method to use",
+                },
+                headers: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                  description: "HTTP headers to include in the request",
+                },
+                body: {
+                  type: "object",
+                  description: "The request body (for POST, PUT, etc.)",
+                },
+                params: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                  description: "URL query parameters",
+                }
+              },
+              required: ["url", "method"],
+            },
+          }
+        ]
       };
     });
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       console.log(request.params);
+      const args = request.params.arguments || {};
+      const token = this.props.bearerToken || "";
+      const marketplaceId = this.props.marketplaceId || "";
+      
+      if (!token && !marketplaceId) {
+        return {
+          content: [{ type: "text", text: "错误：需要提供token或marketplaceId才能使用工具" }],
+        };
+      }
+      
       switch (request.params.name) {
-        case "add":
-          return {
-            content: [{ type: "text", text: String(request.params.arguments.a + request.params.arguments.b) }],
-          };
+        case "list_schemas":
+          try {
+            // 使用通用函数处理Schema列表
+            const result = await handleListSchemas({
+              token,
+              marketplaceId,
+              forDescription: false,
+              env: this.env
+            });
+            
+            if (!result.success) {
+              return {
+                content: [{ type: "text", text: result.error || "获取Schema列表失败" }],
+              };
+            }
+            
+            return {
+              content: [{ type: "text", text: result.schemaInfo }],
+            };
+          } catch (error) {
+            console.error("ListSchema error:", error);
+            return {
+              content: [{ type: "text", text: `获取Schema信息失败: ${error instanceof Error ? error.message : String(error)}` }],
+            };
+          }
+          
+        case "schema_details":
+          try {
+            // 使用通用工具处理Schema详情查询
+            const result = await handleSchemaDetails({
+              remoteSchemaId: args.remoteSchemaId as string | undefined,
+              marketplaceId: (args.marketplaceId as string) || marketplaceId,
+              queryFields: Array.isArray(args.queryFields) ? args.queryFields : [],
+              env: this.env
+            });
+            
+            if (!result.success) {
+              return {
+                content: [{ type: "text", text: `获取Schema详情失败: ${result.error}` }],
+              };
+            }
+            
+            return {
+              content: [{ type: "text", text: JSON.stringify(result.fieldDetails, null, 2) }],
+            };
+          } catch (error) {
+            console.error("SchemaDetails error:", error);
+            return {
+              content: [{ type: "text", text: `获取Schema详情失败: ${error instanceof Error ? error.message : String(error)}` }],
+            };
+          }
+          
+        case "http_request":
+          try {
+            // 使用通用工具处理HTTP请求
+            const result = await handleHttpRequest({
+              url: args.url as string,
+              method: args.method as string,
+              headers: args.headers as Record<string, string> | undefined,
+              body: args.body,
+              params: args.params as Record<string, string> | undefined,
+              env: this.env
+            });
+            
+            if (result.error) {
+              return {
+                content: [{ 
+                  type: "text", 
+                  text: `HTTP请求失败 (${result.status || ''}): ${result.statusText || result.message || '未知错误'}\n\n${result.data ? JSON.stringify(result.data, null, 2) : ''}` 
+                }],
+              };
+            }
+            
+            return {
+              content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }],
+            };
+          } catch (error) {
+            console.error("HTTP request error:", error);
+            
+            return {
+              content: [{ type: "text", text: `HTTP请求失败: ${error instanceof Error ? error.message : String(error)}` }],
+            };
+          }
+          
         default:
           return {
             content: [{ type: "text", text: "工具不存在" }],
@@ -96,19 +305,39 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
 
 
 app.mount("/", (req, env, ctx) => {
-  // This could technically be pulled out into a middleware function, but is left here for clarity
-  // const authHeader = req.headers.get("authorization");
-  // if (!authHeader) {
-  // 	return new Response("Unauthorized", { status: 401 });
-  // }
+  // 从 headers 获取认证信息
+  let authHeader = req.headers.get("authorization");
+  let marketplaceId = req.headers.get("x-marketplace-id");
+  
+  // 从 URL 参数获取认证信息
+  const url = new URL(req.url);
+  const authParam = url.searchParams.get("authorization");
+  const marketplaceParam = url.searchParams.get("x-marketplace-id");
+  
+  // 优先使用 URL 参数
+  if (authParam) {
+    authHeader = authParam.startsWith('Bearer ') ? authParam : `Bearer ${authParam}`;
+  }
+  if (marketplaceParam) {
+    marketplaceId = marketplaceParam;
+  }
 
-  // ctx.props = {
-  // 	bearerToken: authHeader,
-  // 	// could also add arbitrary headers/parameters here to pass into the MCP client
-  // };
+  console.log(authHeader, marketplaceId, 'authHeader');
+  
+  // 设置props
+  ctx.props = {};
+  
+  if (authHeader) {
+    ctx.props.bearerToken = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+  }
+  
+  if (marketplaceId) {
+    ctx.props.marketplaceId = marketplaceId;
+  }
 
   return MyMCP.mount("/sse").fetch(req, env, ctx);
 });
+
 // Chat endpoint
 app.post('/v1/chat/completions', async (c) => {
   try {

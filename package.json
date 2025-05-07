@@ -31,10 +31,13 @@
     "@ai-sdk/react": "^1.2.8",
     "@ai-sdk/ui-utils": "^1.2.7",
     "@mastra/core": "^0.8.2",
+    "@modelcontextprotocol/sdk": "^1.11.0",
     "@openrouter/ai-sdk-provider": "^0.4.5",
+    "agent": "^0.2.1",
     "ai": "^4.3.4",
     "axios": "^1.8.4",
     "graphql": "^16.10.0",
+    "hono": "^4.7.8",
     "openai": "^4.93.0",
     "pg": "^8.14.1",
     "zod": "^3.24.2"

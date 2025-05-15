@@ -116,37 +116,6 @@ export async function handleHttpRequest(params: {
 }
 
 /**
- * 从KV缓存或数据库获取Schema信息
- */
-export async function getSchemaByMarketplaceId(marketplaceId: string, env?: any) {
-  try {
-    // 初始化KV缓存和数据库工具
-    if (env?.CHAT_CACHE) {
-      KVCache.initialize(env.CHAT_CACHE);
-    }
-    
-    if (env?.DATABASE_URL) {
-      DB.initialize(env.DATABASE_URL);
-    }
-    
-    return await KVCache.wrap(
-      `marketplace_${marketplaceId}`,
-      async () => {
-        const schema = await DB.getMarketplaceById(marketplaceId);
-        return schema ? [schema] : [];
-      },
-      {
-        ttl: 60 * 60, // 1小时缓存
-        logHits: true
-      }
-    );
-  } catch (error) {
-    console.error('Error getting schema by marketplaceId:', error);
-    return [];
-  }
-}
-
-/**
  * 从KV缓存或数据库获取所有相关Schema
  */
 export async function getSchemasByToken(token: string, env?: any) {
@@ -225,7 +194,6 @@ export async function handleSchemaDetails(params: {
         
         let dbResult;
         if (sourceType === 'marketplace') {
-          dbResult = await DB.getMarketplaceById(sourceId as string);
         } else {
           dbResult = await DB.getRemoteSchemaById(sourceId as string);
         }
@@ -361,8 +329,6 @@ export async function handleListSchemas(params: {
     let remoteSchemas: any[] = [];
     
     if (marketplaceId) {
-      // 优先使用marketplaceId获取schema
-      remoteSchemas = await getSchemaByMarketplaceId(marketplaceId, env);
     } else if (token) {
       // 使用token获取所有相关schema
       remoteSchemas = await getSchemasByToken(token, env);

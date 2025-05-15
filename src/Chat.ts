@@ -75,7 +75,6 @@ export class Chat {
   private session: ChatSession | null = null;
   private agent: Agent | null = null;
   private token: string | null = null;
-  private marketplaceId: string | null = null;
   private request: Request | null = null;
 
   constructor(state: DurableObjectState, env: Env) {
@@ -117,20 +116,13 @@ export class Chat {
     }
 
     try {
-      // Check for custom token header and marketplace ID
+      // Check for custom token header
       const customToken = request.headers.get('X-Custom-Token');
-      const marketplaceId = request.headers.get('X-Marketplace-ID');
       
       if (customToken) {
         // Use the token from the header
         this.token = customToken;
         console.log('Using custom token from header:', this.token);
-      }
-      
-      if (marketplaceId) {
-        // Use the marketplaceId from the header
-        this.marketplaceId = marketplaceId;
-        console.log('Using marketplace ID from header:', this.marketplaceId);
       }
       
       // Load session data
@@ -167,6 +159,7 @@ export class Chat {
       const userSystemPrompt = userSystemMessages.length > 0 ? userSystemMessages[0].content : '';
 
       const remoteSchemas = await this.getRemoteSchemas();
+
       // console.log('✅ Marketplaces loaded:', JSON.stringify(remoteSchemas, null, 2));
 
       const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, userSystemPrompt);
@@ -242,25 +235,10 @@ export class Chat {
    */
   private async getRemoteSchemas(): Promise<RemoteSchema[]> {
     try {
-      // If marketplaceId is specified, directly get a single Schema
-      if (this.marketplaceId) {
-        return await KVCache.wrap(
-          `marketplace_${this.marketplaceId}`,
-          async () => {
-            const schema = await DB.getMarketplaceById(this.marketplaceId!);
-            return schema ? [schema] : [];
-          },
-          {
-            ttl: CACHE_TTL,
-            logHits: true
-          }
-        );
-      }
-      
-      // Otherwise get all related Schemas through token (projectId)
+      // Get all related Schemas through token (projectId)
       if (this.token) {
         return await KVCache.wrap(
-          `remoteSchemas_project_${this.token}`,
+          `remoteSchemas_project_v4_${this.token}`,
           async () => {
             return await this.queryRemoteSchemasFromDB();
           },
@@ -271,7 +249,7 @@ export class Chat {
         );
       }
       
-      // If neither token nor marketplaceId exists, return empty array
+      // If token doesn't exist, return empty array
       return [];
     } catch (error) {
       console.error('Error getting remoteSchemas:', error);
@@ -291,7 +269,7 @@ export class Chat {
       }
       
       const results = await DB.getRemoteSchemasFromProjectId(this.token) as RemoteSchema[];
-      // console.log('✅ Database query results:', JSON.stringify(results, null, 2));
+      console.log('✅ Database query results:', JSON.stringify(results, null, 2));
       return results;
     } catch (error) {
       console.error('❌ Database query error:', error);
@@ -503,38 +481,22 @@ Regarding schema information usage and caching:
           .map(field => `  - ${field.name}${field.description ? `: ${field.description}` : ''}`)
           .join('\n');
           
-        // Determine the correct ID parameter based on source
-        const idType = this.marketplaceId ? 'marketplaceId' : 'remoteSchemaId';
-        const idValue = this.marketplaceId || remoteSchema.id;
-
-        return `- ${remoteSchema.name} (ID: ${idValue}, used as the ${idType} parameter when calling SchemaDetailsTool), 
+        return `- ${remoteSchema.name} (ID: ${remoteSchema.id}, used as the remoteSchemaId parameter when calling SchemaDetailsTool), 
         Graphql endpoint: https://ai-platform-graphql-frontend.onrender.com/graphql-main-worker \n${fieldsText}`;
       }).join('\n\n');
 
       remoteSchemasInfo = `\n\nYou can access the following GraphQL APIs and queries:\n${remoteSchemasText}\n\n
 When executing any HTTP or GraphQL query, please follow this process:\n
-1. First use SchemaDetailsTool to get GraphQL schema information\n`;
-
-      // 根据当前情境添加参数说明
-      if (this.marketplaceId) {
-        remoteSchemasInfo += `   * Provide marketplaceId: "${this.marketplaceId}" (required)\n`;
-      } else {
-        remoteSchemasInfo += `   * Provide remoteSchemaId (required, use the IDs listed above)\n`;
-      }
-
-      remoteSchemasInfo += `   * Provide an array of queryFields field names that you need\n
+1. First use SchemaDetailsTool to get GraphQL schema information\n
+   * Provide remoteSchemaId (required, use the IDs listed above)\n
+   * Provide an array of queryFields field names that you need\n
 2. Analyze the returned schema information to understand the parameter types and return types of query fields\n
 3. Correctly build GraphQL query parameters and statements based on schema information\n
 4. Use HttpTool to send requests to the corresponding endpoint to execute queries\n\n`;
 
       let headersInfo = '5. Each HttpTool request must include the following headers: { ';
       
-      if (this.marketplaceId) {
-        headersInfo += `'x-marketplace-id': '${this.marketplaceId}'`;
-      }
-      
       if (this.token) {
-        if (this.marketplaceId) headersInfo += ', ';
         headersInfo += `'x-project-id': '${this.token}'`;
       }
       
@@ -578,13 +540,13 @@ function handleToolEvent(eventType: string, part: any, streamId: string, showToo
     case 'tool-call':
     case 'tool-call-streaming-start': {
       const toolName = part.toolName || (part as any).toolCall?.name || "unknown";
-      const formatToolName = toolName.replace('SchemaDetailsTool', 'Fetching Schema Details...')
-      .replace('HttpTool', 'Fetching Data...')
+      const formatToolName = toolName.replace('SchemaDetailsTool', '<SchemaDetailsTool>')
+      .replace('HttpTool', '<HttpTool>')
       return formatStreamingData(`${formatToolName} \n\n `, streamId);
     }
     case 'tool-result': {
-      const formatToolName = part.toolName.replace('SchemaDetailsTool', 'Schema Details Fetched')
-      .replace('HttpTool', 'Data Fetched')
+      const formatToolName = part.toolName.replace('SchemaDetailsTool', '<SchemaDetailsTool>')
+      .replace('HttpTool', '<HttpTool>')
       return formatStreamingData(`${formatToolName} \n\n`, streamId);
     }
     default:

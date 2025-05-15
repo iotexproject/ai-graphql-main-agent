@@ -21,7 +21,6 @@ type Bindings = Env;
 
 type Props = {
   bearerToken: string;
-  marketplaceId?: string;
 };
 
 type State = null;
@@ -85,35 +84,36 @@ const app = new Hono<{ Bindings: Env }>();
 app.use('*', cors({
   origin: '*',
   allowMethods: ['POST', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization', 'X-Marketplace-ID'],
+  allowHeaders: ['Content-Type', 'Authorization'],
   maxAge: 86400,
 }));
 
 
 export class MyMCP extends McpAgent<Bindings, State, Props> {
-  server = new Server({
-    name: "Demo",
-    version: "1.0.0"
-  }, {
-    capabilities: {
-      tools: {},
-    },
-  });
+  server!: Server; // 使用类型断言解决类型兼容性问题
 
   async init() {
+    this.server = new Server({
+      name: "Demo",
+      version: "1.0.0"
+    }, {
+      capabilities: {
+        tools: {},
+      },
+    });
+
     this.server.setRequestHandler(ListToolsRequestSchema, async (request) => {
       console.log(this.props.bearerToken);
       const token = this.props.bearerToken || "";
-      const marketplaceId = this.props.marketplaceId || "";
       
-      if (!token && !marketplaceId) {
-        throw new Error("Missing token or marketplaceId");
+      if (!token) {
+        throw new Error("Missing authorization token");
       }
       
       // 使用通用函数处理Schema列表
       const result = await handleListSchemas({
         token,
-        marketplaceId,
+        marketplaceId: "",
         forDescription: true,
         env: this.env
       });
@@ -143,11 +143,7 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
               properties: {
                 remoteSchemaId: {
                   type: "string",
-                  description: "The remoteSchema ID to fetch schema details for (use this OR marketplaceId)",
-                },
-                marketplaceId: {
-                  type: "string",
-                  description: "The marketplace ID to fetch schema details for (use this OR remoteSchemaId)",
+                  description: "The remoteSchema ID to fetch schema details for",
                 },
                 queryFields: {
                   type: "array",
@@ -201,11 +197,10 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
       console.log(request.params);
       const args = request.params.arguments || {};
       const token = this.props.bearerToken || "";
-      const marketplaceId = this.props.marketplaceId || "";
       
-      if (!token && !marketplaceId) {
+      if (!token) {
         return {
-          content: [{ type: "text", text: "错误：需要提供token或marketplaceId才能使用工具" }],
+          content: [{ type: "text", text: "错误：需要提供authorization token才能使用工具" }],
         };
       }
       
@@ -215,7 +210,7 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
             // 使用通用函数处理Schema列表
             const result = await handleListSchemas({
               token,
-              marketplaceId,
+              marketplaceId: "",
               forDescription: false,
               env: this.env
             });
@@ -241,7 +236,7 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
             // 使用通用工具处理Schema详情查询
             const result = await handleSchemaDetails({
               remoteSchemaId: args.remoteSchemaId as string | undefined,
-              marketplaceId: (args.marketplaceId as string) || marketplaceId,
+              marketplaceId: "",
               queryFields: Array.isArray(args.queryFields) ? args.queryFields : [],
               env: this.env
             });
@@ -304,35 +299,27 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
 }
 
 
-app.mount("/", (req, env, ctx) => {
+// 修改应用挂载方式，明确分离MCP和主应用路由
+app.mount("/mcp", (req, env, ctx) => {
   // 从 headers 获取认证信息
   let authHeader = req.headers.get("authorization");
-  let marketplaceId = req.headers.get("x-marketplace-id");
   
   // 从 URL 参数获取认证信息
   const url = new URL(req.url);
   const authParam = url.searchParams.get("authorization");
-  const marketplaceParam = url.searchParams.get("x-marketplace-id");
   
   // 优先使用 URL 参数
   if (authParam) {
     authHeader = authParam.startsWith('Bearer ') ? authParam : `Bearer ${authParam}`;
   }
-  if (marketplaceParam) {
-    marketplaceId = marketplaceParam;
-  }
 
-  console.log(authHeader, marketplaceId, 'authHeader');
+  console.log(authHeader, 'authHeader');
   
   // 设置props
   ctx.props = {};
   
   if (authHeader) {
     ctx.props.bearerToken = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
-  }
-  
-  if (marketplaceId) {
-    ctx.props.marketplaceId = marketplaceId;
   }
 
   return MyMCP.mount("/sse").fetch(req, env, ctx);
@@ -349,24 +336,19 @@ app.post('/v1/chat/completions', async (c) => {
       token = authHeader.substring(7);
     }
 
-    // Extract marketplaceId from header
-    const marketplaceId = c.req.header('X-Marketplace-ID');
-
-    // If no token and no marketplaceId, return error
-    if (!token && !marketplaceId) {
+    // If no token, return error
+    if (!token) {
       return c.json({
         error: {
-          message: 'Authentication error: Missing token or marketplaceId',
+          message: 'Authentication error: Missing token',
           type: 'authentication_error',
           code: 'invalid_parameters'
         }
       }, 401);
     }
 
-    // Create a Durable Object ID based on the token or a default ID if only marketplaceId is provided
-    const chatId = token
-      ? c.env.Chat.idFromName(token)
-      : c.env.Chat.idFromName(`anonymous-${marketplaceId}`);
+    // Create a Durable Object ID based on the token
+    const chatId = c.env.Chat.idFromName(token);
 
     // Get the Durable Object stub
     const chatDO = c.env.Chat.get(chatId);
@@ -378,15 +360,8 @@ app.post('/v1/chat/completions', async (c) => {
       body: c.req.raw.body
     });
 
-    // Pass token if available
-    if (token) {
-      newRequest.headers.set('X-Custom-Token', token);
-    }
-
-    // Pass marketplaceId if available
-    if (marketplaceId) {
-      newRequest.headers.set('X-Marketplace-ID', marketplaceId);
-    }
+    // Pass token
+    newRequest.headers.set('X-Custom-Token', token);
 
     // Forward the request to the Durable Object
     const response = await chatDO.fetch(newRequest);
@@ -409,5 +384,5 @@ app.post('/v1/chat/completions', async (c) => {
 
 // Export the default Hono app
 export default {
-  fetch: app.fetch
+  fetch: app.fetch.bind(app)
 };

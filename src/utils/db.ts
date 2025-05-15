@@ -100,7 +100,7 @@ export class DB {
     try {
       // 执行查询获取所有marketplace记录
       const result = await this.query(
-        'SELECT id, name, description, endpoint, headers, "schemaData", "createdAt" FROM "remoteSchemas" WHERE project = $1',
+        'SELECT id, name, description, endpoint, headers, "schemaData", "createdAt" FROM "remoteSchemas" WHERE "projectId" = $1',
         [projectId]
       );
       
@@ -140,33 +140,6 @@ export class DB {
       return null;
     } catch (error) {
       console.error(`Error querying remoteSchema with ID ${remoteSchemaId} from DB:`, error);
-      return null;
-    }
-  }
-  
-  /**
-   * 根据ID查询单个marketplace
-   * @param marketplaceId marketplace的ID
-   * @returns 单个marketplace数据
-   */
-  static async getMarketplaceById(marketplaceId: string): Promise<any | null> {
-    try {
-      // 执行查询获取指定ID的marketplace记录
-      const result = await this.query(
-        'SELECT id, name, description, endpoint, headers, "schemaData", "createdAt" FROM "marketplaces" WHERE id = $1',
-        [marketplaceId]
-      );
-      
-      // 检查查询结果
-      if (result && result.rows && result.rows.length > 0) {
-        console.log(`Found marketplace with ID: ${marketplaceId}`);
-        return result.rows[0];
-      }
-      
-      console.warn(`No marketplace found with ID: ${marketplaceId}`);
-      return null;
-    } catch (error) {
-      console.error(`Error querying marketplace with ID ${marketplaceId} from DB:`, error);
       return null;
     }
   }

@@ -63,7 +63,7 @@ export const HttpTool = createTool({
         throw new Error(result.message || 'Unknown HTTP request error');
       }
       
-      console.log('HTTP success:', { status: result.status });
+      console.log('HTTP success:',result.data);
       return {
         data: result.data
       };

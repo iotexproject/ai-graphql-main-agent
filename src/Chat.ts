@@ -108,7 +108,7 @@ export class Chat {
   async fetch(request: Request): Promise<Response> {
     // Store the request for later use
     this.request = request;
-    
+
     // Only handle POST requests
     if (request.method !== 'POST') {
       console.log('❌ Method not allowed:', request.method);
@@ -118,13 +118,13 @@ export class Chat {
     try {
       // Check for custom token header
       const customToken = request.headers.get('X-Custom-Token');
-      
+
       if (customToken) {
         // Use the token from the header
         this.token = customToken;
         console.log('Using custom token from header:', this.token);
       }
-      
+
       // Load session data
       console.log('📝 Loading session data...');
       // await this.loadSession();
@@ -238,7 +238,7 @@ export class Chat {
       // Get all related Schemas through token (projectId)
       if (this.token) {
         return await KVCache.wrap(
-          `remoteSchemas_project_v4_${this.token}`,
+          `remoteSchemas_project_v6_${this.token}`,
           async () => {
             return await this.queryRemoteSchemasFromDB();
           },
@@ -248,7 +248,7 @@ export class Chat {
           }
         );
       }
-      
+
       // If token doesn't exist, return empty array
       return [];
     } catch (error) {
@@ -267,9 +267,9 @@ export class Chat {
         console.log('⚠️ No token available for database query');
         return [];
       }
-      
+
       const results = await DB.getRemoteSchemasFromProjectId(this.token) as RemoteSchema[];
-      console.log('✅ Database query results:', JSON.stringify(results, null, 2));
+      console.log('✅ Database query results:', this.token, JSON.stringify(results, null, 2));
       return results;
     } catch (error) {
       console.error('❌ Database query error:', error);
@@ -447,6 +447,7 @@ If your existing knowledge can answer the current user's question, you don't nee
 Important: Please respond in the same language as the user's question. If the user's question is in Chinese, your answer should be in Chinese. If the user's question is in English, your answer should be in English.
 
 When HTTP calls return errors, you should:
+0. Do not send undefined or null queryParams to the HTTPTool
 1. Check the error message and analyze possible causes
 2. Retry after appropriate adjustments to HTTP parameters (headers, query, etc.)
 3. Try at most 3 times
@@ -480,7 +481,7 @@ Regarding schema information usage and caching:
         const fieldsText = remoteSchema.schemaData.rootFields
           .map(field => `  - ${field.name}${field.description ? `: ${field.description}` : ''}`)
           .join('\n');
-          
+
         return `- ${remoteSchema.name} (ID: ${remoteSchema.id}, used as the remoteSchemaId parameter when calling SchemaDetailsTool), 
         Graphql endpoint: https://ai-platform-graphql-frontend.onrender.com/graphql-main-worker \n${fieldsText}`;
       }).join('\n\n');
@@ -492,22 +493,24 @@ When executing any HTTP or GraphQL query, please follow this process:\n
    * Provide an array of queryFields field names that you need\n
 2. Analyze the returned schema information to understand the parameter types and return types of query fields\n
 3. Correctly build GraphQL query parameters and statements based on schema information\n
-4. Use HttpTool to send requests to the corresponding endpoint to execute queries\n\n`;
+4. Use HttpTool to send requests to the corresponding endpoint to execute queries,
+Do not carry both x-project-id and remoteSchemaId to the header at the same time. If x-project-id is available, use x-project-id first\n\n
+When use HttpTool,Do not put the headers in the body`;
 
       let headersInfo = '5. Each HttpTool request must include the following headers: { ';
-      
+
       if (this.token) {
         headersInfo += `'x-project-id': '${this.token}'`;
       }
-      
+
       headersInfo += ' }\n';
-      
+
       remoteSchemasInfo += headersInfo;
-      
+
       remoteSchemasInfo += `
 This process is very important because without the correct schema information, you won't know what input parameters GraphQL queries require and what output structures they will return.`;
     }
-    
+
     // Combine final system prompt
     return `${baseSystemPrompt}${remoteSchemasInfo}${userSystemPrompt ? '\n\n' + userSystemPrompt : ''}`;
   }
@@ -535,18 +538,18 @@ function handleToolEvent(eventType: string, part: any, streamId: string, showToo
   if (!showToolEvents) {
     return null;
   }
-  
+
   switch (eventType) {
     case 'tool-call':
     case 'tool-call-streaming-start': {
       const toolName = part.toolName || (part as any).toolCall?.name || "unknown";
-      const formatToolName = toolName.replace('SchemaDetailsTool', '<SchemaDetailsTool>')
-      .replace('HttpTool', '<HttpTool>')
+      const formatToolName = toolName.replace('SchemaDetailsTool', '<SchemaDetailsToolStart>')
+        .replace('HttpTool', '<HttpToolStart>')
       return formatStreamingData(`${formatToolName} \n\n `, streamId);
     }
     case 'tool-result': {
-      const formatToolName = part.toolName.replace('SchemaDetailsTool', '<SchemaDetailsTool>')
-      .replace('HttpTool', '<HttpTool>')
+      const formatToolName = part.toolName.replace('SchemaDetailsTool', '<SchemaDetailsToolEnd>')
+        .replace('HttpTool', '<HttpToolEnd>')
       return formatStreamingData(`${formatToolName} \n\n`, streamId);
     }
     default:

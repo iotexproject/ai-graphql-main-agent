@@ -12,7 +12,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { KVCache } from "./utils/kv";
 import { DB } from "./utils/db";
 import axios from 'axios';
-import { getFullTypeName, isNonNullType, handleHttpRequest, handleSchemaDetails, getSchemaByMarketplaceId, getSchemasByToken, handleListSchemas } from "./utils/tool-handlers";
+import { getFullTypeName, isNonNullType,handleSchemaDetails, handleListSchemas } from "./utils/tool-handlers";
 // Re-export the Chat class for Durable Objects
 export { Chat };
 
@@ -84,7 +84,7 @@ const app = new Hono<{ Bindings: Env }>();
 app.use('*', cors({
   origin: '*',
   allowMethods: ['POST', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
+  allowHeaders: ['Content-Type', 'Authorization','withToolEvent'],
   maxAge: 86400,
 }));
 
@@ -331,7 +331,7 @@ app.post('/v1/chat/completions', async (c) => {
     // Extract token from Authorization header
     const authHeader = c.req.header('Authorization') || '';
     let token = '';
-
+    console.log(authHeader, 'authHeader');
     if (authHeader.startsWith('Bearer ')) {
       token = authHeader.substring(7);
     }

@@ -63,7 +63,7 @@ export interface ChatRequestBody {
 // KV cache key
 const MARKETPLACE_CACHE_KEY = 'remoteSchemas_data';
 // Cache expiration time (1 hour) - in seconds
-const CACHE_TTL = 60 * 60;
+const CACHE_TTL = 60;
 
 /**
  * Chat Durable Object 

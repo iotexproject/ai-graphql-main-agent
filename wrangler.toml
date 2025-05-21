@@ -8,6 +8,15 @@ compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
 name = "Chat"
 class_name = "Chat"
 
+
+[[durable_objects.bindings]]
+name = "APIUSAGE"
+class_name = "ApiUsage"
+
+[[durable_objects.bindings]]
+name = "USERSESSION"
+class_name = "UserSession"
+
 [[durable_objects.bindings]]
 name = "MCP_OBJECT"
 class_name = "MyMCP"

@@ -33,6 +33,7 @@
     "@mastra/core": "^0.8.2",
     "@modelcontextprotocol/sdk": "^1.11.0",
     "@openrouter/ai-sdk-provider": "^0.4.5",
+    "@polar-sh/sdk": "^0.32.15",
     "agent": "^0.2.1",
     "agents": "^0.0.87",
     "ai": "^4.3.4",

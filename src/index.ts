@@ -1,6 +1,6 @@
 import { openai } from "@ai-sdk/openai";
 import { streamText, generateId } from "ai";
-import { Hono } from 'hono';
+import { Hono, type Context, type Next } from 'hono';
 import { cors } from 'hono/cors';
 import type { ChatRequestBody, Message } from "./Chat";
 import { Chat } from "./Chat";
@@ -13,8 +13,12 @@ import { KVCache } from "./utils/kv";
 import { DB } from "./utils/db";
 import axios from 'axios';
 import { getFullTypeName, isNonNullType,handleSchemaDetails, handleListSchemas } from "./utils/tool-handlers";
+import { getApiKeyManager } from "./utils/apikey";
+import type { UserSession } from "./storage/UserSession";
 // Re-export the Chat class for Durable Objects
 export { Chat };
+export { ApiUsage } from "./storage/ApiUsage";
+export { UserSession } from "./storage/UserSession";
 
 
 type Bindings = Env;
@@ -25,6 +29,7 @@ type Props = {
 
 type State = null;
 
+
 // Worker environment type definition
 interface Env {
   OPENAI_API_KEY: string;
@@ -32,6 +37,9 @@ interface Env {
   DATABASE_URL?: string; // PostgreSQL connection string
   CHAT_CACHE?: KVNamespace; // KV namespace for caching
   Chat: DurableObjectNamespace;
+  POLAR_ACCESS_TOKEN?: string;
+  GATEWAY_PROJECT_ID: string;
+  USERSESSION: DurableObjectNamespace<UserSession>;
 }
 
 // Remote Schema interface
@@ -78,7 +86,7 @@ interface ChatResponse {
 }
 
 // Create Hono app
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env, Variables: { projectId: string, userId: string | null } }>();
 
 // Apply CORS middleware
 app.use('*', cors({
@@ -87,6 +95,29 @@ app.use('*', cors({
   allowHeaders: ['Content-Type', 'Authorization','withToolEvent'],
   maxAge: 86400,
 }));
+app.use('*', async (c, next) => {
+  DB.initialize(c.env.DATABASE_URL)
+  return next()
+})
+
+app.use("*", async (c, next) => {
+  const apikey = c.req.header('x-api-key')
+  if (!apikey) {
+    c.set("userId", null);
+    return next();
+  }
+  const userSessionId = c.env.USERSESSION.idFromName(apikey)
+  const userSessionDO = c.env.USERSESSION.get(userSessionId)
+  const {userId} = await userSessionDO.init({apiKey: apikey})
+  console.log('userId', userId)
+  if (!userId) {
+    c.set("userId", null);
+    return next();
+  }
+
+  c.set("userId", userId);
+  return next();
+});
 
 
 export class MyMCP extends McpAgent<Bindings, State, Props> {
@@ -299,6 +330,8 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
 }
 
 
+
+
 // 修改应用挂载方式，明确分离MCP和主应用路由
 app.mount("/mcp", (req, env, ctx) => {
   // 从 headers 获取认证信息
@@ -325,6 +358,29 @@ app.mount("/mcp", (req, env, ctx) => {
   return MyMCP.mount("/sse").fetch(req, env, ctx);
 });
 
+
+const apiKeyMiddleware = async (c: Context, next: Next) => {
+  const userId = c.get("userId")
+  if (!userId) {
+    return c.json({
+      error: {
+        message: 'Authentication error: Missing API Key',
+        type: 'authentication_error',
+        code: 'invalid_parameters'
+      }
+    }, 401);
+  }
+  const cost = 10
+  const apiKeyManager = getApiKeyManager(c.env as any)
+  const projectId = c.env.GATEWAY_PROJECT_ID
+  await apiKeyManager.verifyKey({
+    userId,
+    cost,
+    projectId
+  })
+  await next()
+}
+
 // Chat endpoint
 app.post('/v1/chat/completions', async (c) => {
   try {
@@ -347,12 +403,15 @@ app.post('/v1/chat/completions', async (c) => {
       }, 401);
     }
 
+  
     // Create a Durable Object ID based on the token
     const chatId = c.env.Chat.idFromName(token);
 
     // Get the Durable Object stub
     const chatDO = c.env.Chat.get(chatId);
-
+    // const body = await c.req.json();
+    // const model = body.model;
+ 
     // Create a new request with custom headers
     const newRequest = new Request(c.req.url, {
       method: c.req.method,
@@ -381,7 +440,31 @@ app.post('/v1/chat/completions', async (c) => {
     }, 500);
   }
 });
+// app.get('/test', async (c) => {
 
+//   const userId = c.get("userId")
+//   if (!userId) {
+//     return c.json({
+//       error: {
+//         message: 'Authentication error:  API Key is invalid',
+//         type: 'authentication_error',
+//         code: 'invalid_parameters'
+//       }
+//     }, 401);
+//   }
+//   const cost = 1
+//   const apiKeyManager = getApiKeyManager(c.env as any)
+//   const projectId = c.env.PROJECT_ID
+//   await apiKeyManager.verifyKey({
+//     userId,
+//     cost,
+//     projectId
+//   })
+//   return c.json({
+//     message: 'test',
+//     userId
+//   })
+// })
 // Export the default Hono app
 export default {
   fetch: app.fetch.bind(app)

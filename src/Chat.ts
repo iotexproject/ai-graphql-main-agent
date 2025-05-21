@@ -483,7 +483,7 @@ Regarding schema information usage and caching:
           .join('\n');
 
         return `- ${remoteSchema.name} (ID: ${remoteSchema.id}, used as the remoteSchemaId parameter when calling SchemaDetailsTool), 
-        Graphql endpoint: https://ai-platform-graphql-frontend.onrender.com/graphql-main-worker \n${fieldsText}`;
+        Graphql endpoint: https://quicksliver.iotex.me/graphql-main-worker \n${fieldsText}`;
       }).join('\n\n');
 
       remoteSchemasInfo = `\n\nYou can access the following GraphQL APIs and queries:\n${remoteSchemasText}\n\n

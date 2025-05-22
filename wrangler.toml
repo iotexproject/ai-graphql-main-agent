@@ -3,6 +3,7 @@ main = "src/index.ts"
 compatibility_date = "2025-02-04"
 compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
 
+
 # 定义绑定到Durable Objects
 [[durable_objects.bindings]]
 name = "Chat"
@@ -45,3 +46,4 @@ preview_id = "e073d6bb683145ca971c0dc3790c787b" # 在实际部署时需要替换
 [observability]
 enabled = true
 head_sampling_rate = 1 # optional. default = 1.
+

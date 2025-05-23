@@ -86,8 +86,68 @@ interface ChatResponse {
   };
 }
 
+
+const apiKeyMiddleware = async (c: Context, next: Next) => {
+  // Extract token from Authorization header
+  const authHeader = c.req.header('Authorization') || '';
+  let token = '';
+  if (authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7);
+    c.set("token", token);
+  }
+  if (!token) {
+    return c.json({
+      error: {
+        message: 'Authentication error: Missing token',
+        type: 'authentication_error',
+        code: 'invalid_parameters'
+      }
+    }, 401);
+  }
+
+  const projectPrice = await KVCache.wrap(`project_price_${token}`, async () => {
+    const projectPrice = await DB.query(`SELECT pricing->>'price' as price FROM projects WHERE id = $1`, [token])
+    return projectPrice?.rows[0]?.price
+  }, {
+    ttl: 60
+  })
+
+  const apikey = c.req.header('x-api-key')
+  if (!apikey) {
+    return c.json({
+      error: {
+        message: 'Authentication error: Missing API Key',
+        type: 'authentication_error',
+        code: 'invalid_parameters'
+      }
+    }, 401);
+  }
+  const userSessionId = c.env.USERSESSION.idFromName(apikey)
+  const userSessionDO = c.env.USERSESSION.get(userSessionId)
+  const { userId } = await userSessionDO.init({ apiKey: apikey })
+
+  if (!userId) {
+    return c.json({
+      error: {
+        message: 'Authentication error: Unauthorized API Key',
+        type: 'authentication_error',
+        code: 'invalid_parameters'
+      }
+    }, 401);
+  }
+  const cost = projectPrice || 1
+  const apiKeyManager = getApiKeyManager(c.env as any)
+  const projectId = c.env.GATEWAY_PROJECT_ID
+  await apiKeyManager.verifyKey({
+    userId,
+    cost,
+    projectId
+  })
+  await next()
+}
+
 // Create Hono app
-const app = new Hono<{ Bindings: Env, Variables: { projectId: string, userId: string | null } }>();
+const app = new Hono<{ Bindings: Env, Variables: { projectId: string, userId: string | null, token: string | null } }>();
 
 // Apply CORS middleware
 app.use('*', cors({
@@ -98,27 +158,9 @@ app.use('*', cors({
 }));
 app.use('*', async (c, next) => {
   DB.initialize(c.env.DATABASE_URL)
+  KVCache.initialize(c.env.CHAT_CACHE);
   return next()
 })
-
-// app.use("*", async (c, next) => {
-//   const apikey = c.req.header('x-api-key')
-//   if (!apikey) {
-//     c.set("userId", null);
-//     return next();
-//   }
-//   const userSessionId = c.env.USERSESSION.idFromName(apikey)
-//   const userSessionDO = c.env.USERSESSION.get(userSessionId)
-//   const { userId } = await userSessionDO.init({ apiKey: apikey })
-//   console.log('userId', userId)
-//   if (!userId) {
-//     c.set("userId", null);
-//     return next();
-//   }
-
-//   c.set("userId", userId);
-//   return next();
-// });
 
 
 export class MyMCP extends McpAgent<Bindings, State, Props> {
@@ -332,27 +374,11 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
 }
 
 
+app.use('/v1/chat/completions', apiKeyMiddleware)
 app.post('/v1/chat/completions', async (c) => {
   try {
-    console.log(123)
-    // Extract token from Authorization header
-    const authHeader = c.req.header('Authorization') || '';
-    let token = '';
-    console.log(authHeader, 'authHeader');
-    if (authHeader.startsWith('Bearer ')) {
-      token = authHeader.substring(7);
-    }
-
+    const token = c.get("token")!
     // If no token, return error
-    if (!token) {
-      return c.json({
-        error: {
-          message: 'Authentication error: Missing token',
-          type: 'authentication_error',
-          code: 'invalid_parameters'
-        }
-      }, 401);
-    }
 
 
     // Create a Durable Object ID based on the token
@@ -418,27 +444,6 @@ app.mount("/", (req, env, ctx) => {
 });
 
 
-const apiKeyMiddleware = async (c: Context, next: Next) => {
-  const userId = c.get("userId")
-  if (!userId) {
-    return c.json({
-      error: {
-        message: 'Authentication error: Missing API Key',
-        type: 'authentication_error',
-        code: 'invalid_parameters'
-      }
-    }, 401);
-  }
-  const cost = 10
-  const apiKeyManager = getApiKeyManager(c.env as any)
-  const projectId = c.env.GATEWAY_PROJECT_ID
-  await apiKeyManager.verifyKey({
-    userId,
-    cost,
-    projectId
-  })
-  await next()
-}
 
 // Chat endpoint
 

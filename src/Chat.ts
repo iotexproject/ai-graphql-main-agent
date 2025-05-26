@@ -296,12 +296,14 @@ export class Chat {
       console.log(this.env.OPENAI_API_KEY, 'this.env.OPENAI_API_KEY')
       const openai = createOpenRouter({
         apiKey: this.env.OPENAI_API_KEY,
+        baseURL: "https://gateway.ai.cloudflare.com/v1/3f724e4b38a30ee9d189654b73a4e87e/quicksilver/openrouter"
       });
 
       this.agent = new Agent({
         name: "Chat Agent",
         instructions,
-        model: openai.languageModel("openai/gpt-4o"),
+        //thinking model:qwen/qwen3-32b
+        model: openai.languageModel("qwen/qwen-2.5-72b-instruct"),
         tools: { HttpTool, SchemaDetailsTool },
       });
 

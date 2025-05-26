@@ -178,7 +178,6 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
     });
 
     this.server.setRequestHandler(ListToolsRequestSchema, async (request) => {
-      console.log(this.props.bearerToken);
       const token = this.props.bearerToken || "";
 
       if (!token) {
@@ -192,7 +191,6 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
         forDescription: true,
         env: this.env
       });
-
       if (!result.success) {
         throw new Error(result.error);
       }

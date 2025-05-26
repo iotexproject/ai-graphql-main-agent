@@ -1,26 +1,31 @@
 import { openai } from "@ai-sdk/openai";
-import { streamText, generateId } from "ai";
-import { Hono, type Context, type Next } from 'hono';
-import { cors } from 'hono/cors';
-import type { ChatRequestBody, Message } from "./Chat";
+import { embed } from "ai";
+import { Hono, type Context, type Next } from "hono";
+import { cors } from "hono/cors";
 import { Chat } from "./Chat";
 import { McpAgent } from "agents/mcp";
-
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { z } from "zod";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import "zod-openapi/extend";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { KVCache } from "./utils/kv";
 import { DB } from "./utils/db";
-import axios from 'axios';
-import { getFullTypeName, isNonNullType, handleSchemaDetails, handleListSchemas } from "./utils/tool-handlers";
+import { handleSchemaDetails, handleListSchemas } from "./utils/tool-handlers";
 import { getApiKeyManager } from "./utils/apikey";
 import type { UserSession } from "./storage/UserSession";
 import { handleHTTPRequest } from "./HttpTool";
+import { PineconeVector } from "@mastra/pinecone";
+import { zValidator } from "@hono/zod-validator";
+import { createDocument } from "zod-openapi";
+import VectorQuerySchema from "./utils/vector-filter-schema";
+
 // Re-export the Chat class for Durable Objects
 export { Chat };
 export { ApiUsage } from "./storage/ApiUsage";
 export { UserSession } from "./storage/UserSession";
-
 
 type Bindings = Env;
 
@@ -29,7 +34,6 @@ type Props = {
 };
 
 type State = null;
-
 
 // Worker environment type definition
 interface Env {
@@ -86,96 +90,119 @@ interface ChatResponse {
   };
 }
 
-
 const apiKeyMiddleware = async (c: Context, next: Next) => {
   // Extract token from Authorization header
-  const authHeader = c.req.header('Authorization') || '';
-  let token = '';
-  if (authHeader.startsWith('Bearer ')) {
+  const authHeader = c.req.header("Authorization") || "";
+  let token = "";
+  if (authHeader.startsWith("Bearer ")) {
     token = authHeader.substring(7);
     c.set("token", token);
   }
   if (!token) {
-    return c.json({
-      error: {
-        message: 'Authentication error: Missing token',
-        type: 'authentication_error',
-        code: 'invalid_parameters'
-      }
-    }, 401);
+    return c.json(
+      {
+        error: {
+          message: "Authentication error: Missing token",
+          type: "authentication_error",
+          code: "invalid_parameters",
+        },
+      },
+      401
+    );
   }
 
-  const projectPrice = await KVCache.wrap(`project_price_${token}`, async () => {
-    const projectPrice = await DB.query(`SELECT pricing->>'price' as price FROM projects WHERE id = $1`, [token])
-    return projectPrice?.rows[0]?.price
-  }, {
-    ttl: 60
-  })
+  const projectPrice = await KVCache.wrap(
+    `project_price_${token}`,
+    async () => {
+      const projectPrice = await DB.query(
+        `SELECT pricing->>'price' as price FROM projects WHERE id = $1`,
+        [token]
+      );
+      return projectPrice?.rows[0]?.price;
+    },
+    {
+      ttl: 60,
+    }
+  );
 
-  const apikey = c.req.header('x-api-key')
+  const apikey = c.req.header("x-api-key");
   if (!apikey) {
-    return c.json({
-      error: {
-        message: 'Authentication error: Missing API Key',
-        type: 'authentication_error',
-        code: 'invalid_parameters'
-      }
-    }, 401);
+    return c.json(
+      {
+        error: {
+          message: "Authentication error: Missing API Key",
+          type: "authentication_error",
+          code: "invalid_parameters",
+        },
+      },
+      401
+    );
   }
-  const userSessionId = c.env.USERSESSION.idFromName(apikey)
-  const userSessionDO = c.env.USERSESSION.get(userSessionId)
-  const { userId } = await userSessionDO.init({ apiKey: apikey })
+  const userSessionId = c.env.USERSESSION.idFromName(apikey);
+  const userSessionDO = c.env.USERSESSION.get(userSessionId);
+  const { userId } = await userSessionDO.init({ apiKey: apikey });
 
   if (!userId) {
-    return c.json({
-      error: {
-        message: 'Authentication error: Unauthorized API Key',
-        type: 'authentication_error',
-        code: 'invalid_parameters'
-      }
-    }, 401);
+    return c.json(
+      {
+        error: {
+          message: "Authentication error: Unauthorized API Key",
+          type: "authentication_error",
+          code: "invalid_parameters",
+        },
+      },
+      401
+    );
   }
-  const cost = projectPrice || 1
-  const apiKeyManager = getApiKeyManager(c.env as any)
-  const projectId = c.env.GATEWAY_PROJECT_ID
+  const cost = projectPrice || 1;
+  const apiKeyManager = getApiKeyManager(c.env as any);
+  const projectId = c.env.GATEWAY_PROJECT_ID;
   await apiKeyManager.verifyKey({
     userId,
     cost,
-    projectId
-  })
-  await next()
-}
+    projectId,
+  });
+  await next();
+};
 
 // Create Hono app
-const app = new Hono<{ Bindings: Env, Variables: { projectId: string, userId: string | null, token: string | null } }>();
+const app = new Hono<{
+  Bindings: Env;
+  Variables: { projectId: string; userId: string | null; token: string | null };
+}>();
 
 // Apply CORS middleware
-app.use('*', cors({
-  origin: '*',
-  allowMethods: ['POST', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization', 'withToolEvent'],
-  maxAge: 86400,
-}));
-app.use('*', async (c, next) => {
-  DB.initialize(c.env.DATABASE_URL)
+app.use(
+  "*",
+  cors({
+    origin: "*",
+    allowMethods: ["POST", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization", "withToolEvent"],
+    maxAge: 86400,
+  })
+);
+app.use("*", async (c, next) => {
+  DB.initialize(c.env.DATABASE_URL);
   KVCache.initialize(c.env.CHAT_CACHE);
-  return next()
-})
-
+  return next();
+});
 
 export class MyMCP extends McpAgent<Bindings, State, Props> {
-  // @ts-ignore 
+  // @ts-ignore
   server!: Server;
 
   async init() {
-    this.server = new Server({
-      name: "Demo",
-      version: "1.0.0"
-    }, {
-      capabilities: {
-        tools: {},
+    this.server = new Server(
+      {
+        name: "Demo",
+        version: "1.0.0",
       },
-    });
+      {
+        capabilities: {
+          tools: {},
+        },
+      }
+    );
 
     this.server.setRequestHandler(ListToolsRequestSchema, async (request) => {
       console.log(this.props.bearerToken);
@@ -190,7 +217,7 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
         token,
         marketplaceId: "",
         forDescription: true,
-        env: this.env
+        env: this.env,
       });
 
       if (!result.success) {
@@ -212,28 +239,32 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
           },
           {
             name: "schema_details",
-            description: "Get detailed information about GraphQL schema fields, including arguments, input and output types",
+            description:
+              "Get detailed information about GraphQL schema fields, including arguments, input and output types",
             inputSchema: {
               type: "object",
               properties: {
                 remoteSchemaId: {
                   type: "string",
-                  description: "The remoteSchema ID to fetch schema details for",
+                  description:
+                    "The remoteSchema ID to fetch schema details for",
                 },
                 queryFields: {
                   type: "array",
                   items: {
-                    type: "string"
+                    type: "string",
                   },
-                  description: "List of field names to get details for (can be query or mutation fields)",
-                }
+                  description:
+                    "List of field names to get details for (can be query or mutation fields)",
+                },
               },
               required: ["queryFields"],
             },
           },
           {
             name: "http_request",
-            description: "Send HTTP requests to external APIs, including GraphQL endpoints",
+            description:
+              "Send HTTP requests to external APIs, including GraphQL endpoints",
             inputSchema: {
               type: "object",
               properties: {
@@ -259,12 +290,12 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
                   type: "object",
                   additionalProperties: { type: "string" },
                   description: "URL query parameters",
-                }
+                },
               },
               required: ["url", "method"],
             },
-          }
-        ]
+          },
+        ],
       };
     });
 
@@ -275,7 +306,12 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
 
       if (!token) {
         return {
-          content: [{ type: "text", text: "错误：需要提供authorization token才能使用工具" }],
+          content: [
+            {
+              type: "text",
+              text: "错误：需要提供authorization token才能使用工具",
+            },
+          ],
         };
       }
 
@@ -287,12 +323,14 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
               token,
               marketplaceId: "",
               forDescription: false,
-              env: this.env
+              env: this.env,
             });
 
             if (!result.success) {
               return {
-                content: [{ type: "text", text: result.error || "获取Schema列表失败" }],
+                content: [
+                  { type: "text", text: result.error || "获取Schema列表失败" },
+                ],
               };
             }
 
@@ -302,7 +340,12 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
           } catch (error) {
             console.error("ListSchema error:", error);
             return {
-              content: [{ type: "text", text: `获取Schema信息失败: ${error instanceof Error ? error.message : String(error)}` }],
+              content: [
+                {
+                  type: "text",
+                  text: `获取Schema信息失败: ${error instanceof Error ? error.message : String(error)}`,
+                },
+              ],
             };
           }
 
@@ -312,23 +355,37 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
             const result = await handleSchemaDetails({
               remoteSchemaId: args.remoteSchemaId as string | undefined,
               marketplaceId: "",
-              queryFields: Array.isArray(args.queryFields) ? args.queryFields : [],
-              env: this.env
+              queryFields: Array.isArray(args.queryFields)
+                ? args.queryFields
+                : [],
+              env: this.env,
             });
 
             if (!result.success) {
               return {
-                content: [{ type: "text", text: `获取Schema详情失败: ${result.error}` }],
+                content: [
+                  { type: "text", text: `获取Schema详情失败: ${result.error}` },
+                ],
               };
             }
 
             return {
-              content: [{ type: "text", text: JSON.stringify(result.fieldDetails, null, 2) }],
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(result.fieldDetails, null, 2),
+                },
+              ],
             };
           } catch (error) {
             console.error("SchemaDetails error:", error);
             return {
-              content: [{ type: "text", text: `获取Schema详情失败: ${error instanceof Error ? error.message : String(error)}` }],
+              content: [
+                {
+                  type: "text",
+                  text: `获取Schema详情失败: ${error instanceof Error ? error.message : String(error)}`,
+                },
+              ],
             };
           }
 
@@ -341,26 +398,35 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
               headers: args.headers as Record<string, string> | undefined,
               body: args.body,
               params: args.params as Record<string, string> | undefined,
-              env: this.env
+              env: this.env,
             });
 
             if (result.error) {
               return {
-                content: [{ 
-                  type: "text", 
-                  text: `HTTP请求失败 (${result.status || ''}): ${result.statusText || result.message || '未知错误'}\n\n${result.data ? JSON.stringify(result.data, null, 2) : ''}` 
-                }],
+                content: [
+                  {
+                    type: "text",
+                    text: `HTTP请求失败 (${result.status || ""}): ${result.statusText || result.message || "未知错误"}\n\n${result.data ? JSON.stringify(result.data, null, 2) : ""}`,
+                  },
+                ],
               };
             }
-            
+
             return {
-              content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }],
+              content: [
+                { type: "text", text: JSON.stringify(result.data, null, 2) },
+              ],
             };
           } catch (error) {
             console.error("HTTP request error:", error);
 
             return {
-              content: [{ type: "text", text: `HTTP请求失败: ${error instanceof Error ? error.message : String(error)}` }],
+              content: [
+                {
+                  type: "text",
+                  text: `HTTP请求失败: ${error instanceof Error ? error.message : String(error)}`,
+                },
+              ],
             };
           }
 
@@ -373,13 +439,11 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
   }
 }
 
-
-app.use('/v1/chat/completions', apiKeyMiddleware)
-app.post('/v1/chat/completions', async (c) => {
+app.use("/v1/chat/completions", apiKeyMiddleware);
+app.post("/v1/chat/completions", async (c) => {
   try {
-    const token = c.get("token")!
+    const token = c.get("token")!;
     // If no token, return error
-
 
     // Create a Durable Object ID based on the token
     const chatId = c.env.Chat.idFromName(token);
@@ -393,11 +457,11 @@ app.post('/v1/chat/completions', async (c) => {
     const newRequest = new Request(c.req.url, {
       method: c.req.method,
       headers: c.req.raw.headers,
-      body: c.req.raw.body
+      body: c.req.raw.body,
     });
 
     // Pass token
-    newRequest.headers.set('X-Custom-Token', token);
+    newRequest.headers.set("X-Custom-Token", token);
 
     // Forward the request to the Durable Object
     const response = await chatDO.fetch(newRequest);
@@ -406,16 +470,127 @@ app.post('/v1/chat/completions', async (c) => {
     return new Response(response.body, response);
   } catch (error) {
     // Handle any unexpected errors
-    console.error('Error routing chat request:', error);
-    return c.json({
-      error: {
-        message: 'Failed to route chat request',
-        type: 'server_error',
-        code: 'processing_error',
-        details: error instanceof Error ? error.message : String(error)
-      }
-    }, 500);
+    console.error("Error routing chat request:", error);
+    return c.json(
+      {
+        error: {
+          message: "Failed to route chat request",
+          type: "server_error",
+          code: "processing_error",
+          details: error instanceof Error ? error.message : String(error),
+        },
+      },
+      500
+    );
   }
+});
+
+app.post(
+  "/v1/rag/pinecone",
+  zValidator(
+    "json",
+    z.object({
+      query: z.string(),
+      modelId: z.string().default("text-embedding-3-small"),
+      pineconeApiKey: z.string(),
+      indexName: z.string(),
+      filter: VectorQuerySchema,
+    }),
+    (result, c) => {
+      if (!result.success) {
+        return c.text("Invalid!", 400);
+      }
+    }
+  ),
+  async (c) => {
+    const data = c.req.valid("json");
+    const { query, modelId, pineconeApiKey, indexName, filter } = data;
+    try {
+      const { embedding } = await embed({
+        value: query,
+        model: openai.embedding(modelId),
+      });
+      const store = new PineconeVector({
+        apiKey: pineconeApiKey,
+      });
+      const results = await store.query({
+        indexName: indexName,
+        queryVector: embedding,
+        topK: 10,
+        filter: filter,
+      });
+      console.log("results=>", results);
+      return c.json(results);
+    } catch (error) {
+      console.error("error=>", error);
+      return c.json(
+        {
+          error: {
+            message: "error",
+            type: "server_error",
+          },
+        },
+        500
+      );
+    }
+  }
+);
+
+app.get("/rag/doc", async (c) => {
+  const document = createDocument({
+    openapi: "3.1.0",
+    info: {
+      title: "rag API",
+      version: "1.0.0",
+    },
+    paths: {
+      "/v1/rag/pinecone": {
+        post: {
+          requestBody: {
+            content: {
+              "application/json": {
+                schema: z.object({
+                  query: z.string().openapi({ description: "query text" }),
+                  modelId: z
+                    .string()
+                    .default("text-embedding-3-small")
+                    .openapi({ description: "model id" }),
+                  pineconeApiKey: z
+                    .string()
+                    .openapi({ description: "pinecone api key" }),
+                  indexName: z.string().openapi({ description: "index name" }),
+                  filter: VectorQuerySchema.openapi({
+                    description: "filter",
+                  }),
+                }),
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "200 OK",
+              content: {
+                "application/json": {
+                  schema: z.object({
+                    results: z.array(
+                      z.object({
+                        text: z.string(),
+                        score: z.number(),
+                        metadata: z.object({
+                          source: z.string(),
+                        }),
+                      })
+                    ),
+                  }),
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+  return c.json(document);
 });
 
 app.mount("/", (req, env, ctx) => {
@@ -428,16 +603,20 @@ app.mount("/", (req, env, ctx) => {
 
   // 优先使用 URL 参数
   if (authParam) {
-    authHeader = authParam.startsWith('Bearer ') ? authParam : `Bearer ${authParam}`;
+    authHeader = authParam.startsWith("Bearer ")
+      ? authParam
+      : `Bearer ${authParam}`;
   }
 
-  console.log(authHeader, 'authHeader');
+  console.log(authHeader, "authHeader");
 
   // 设置props
   ctx.props = {};
 
   if (authHeader) {
-    ctx.props.bearerToken = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+    ctx.props.bearerToken = authHeader.startsWith("Bearer ")
+      ? authHeader.substring(7)
+      : authHeader;
   }
 
   return MyMCP.mount("/sse").fetch(req, env, ctx);
@@ -474,5 +653,5 @@ app.mount("/", (req, env, ctx) => {
 // })
 // Export the default Hono app
 export default {
-  fetch: app.fetch.bind(app)
+  fetch: app.fetch.bind(app),
 };

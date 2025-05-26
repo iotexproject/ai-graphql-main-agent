@@ -5,6 +5,7 @@ import { DurableObject } from "cloudflare:workers";
 
 
 interface Env {
+    OPENROUTER_API_KEY: string;
     OPENAI_API_KEY: string;
     MODEL_NAME?: string;
     DATABASE_URL?: string; // PostgreSQL connection string

@@ -40,7 +40,8 @@ npm install
 创建一个`.dev.vars`文件用于本地开发（示例）：
 
 ```
-OPENAI_API_KEY=sk-your-openai-api-key
+OPENROUTER_API_KEY=
+OPENAI_API_KEY=
 MODEL_NAME=gpt-4o-2024-11-20
 DATABASE_URL=postgresql://username:password@host:port/database
 ```

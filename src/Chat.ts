@@ -293,9 +293,9 @@ export class Chat {
     console.log('🤖 Creating new agent instance...');
     try {
       // Create OpenRouter provider with API key
-      console.log(this.env.OPENAI_API_KEY, 'this.env.OPENAI_API_KEY')
+      console.log(this.env.OPENROUTER_API_KEY, 'this.env.OPENROUTER_API_KEY')
       const openai = createOpenRouter({
-        apiKey: this.env.OPENAI_API_KEY,
+        apiKey: this.env.OPENROUTER_API_KEY,
       });
 
       this.agent = new Agent({
@@ -559,6 +559,7 @@ function handleToolEvent(eventType: string, part: any, streamId: string, showToo
 
 // Worker environment type definition
 interface Env {
+  OPENROUTER_API_KEY: string;
   OPENAI_API_KEY: string;
   MODEL_NAME?: string;
   DATABASE_URL?: string; // PostgreSQL connection string

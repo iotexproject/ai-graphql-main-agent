@@ -520,10 +520,8 @@ app.post(
         topK: 10,
         filter: filter,
       });
-      console.log("results=>", results);
       return c.json(results);
     } catch (error) {
-      console.error("error=>", error);
       return c.json(
         {
           error: {
@@ -622,8 +620,6 @@ app.mount("/", (req, env, ctx) => {
 
   return MyMCP.mount("/sse").fetch(req, env, ctx);
 });
-
-
 
 // Chat endpoint
 

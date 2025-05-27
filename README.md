@@ -51,6 +51,9 @@ DATABASE_URL=postgresql://username:password@host:port/database
 对于生产环境，使用Wrangler CLI设置秘密：
 
 ```bash
+# 设置OpenRouter API密钥
+wrangler secret put OPENROUTER_API_KEY
+
 # 设置OpenAI API密钥
 wrangler secret put OPENAI_API_KEY
 

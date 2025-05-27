@@ -20,7 +20,6 @@ import { handleHTTPRequest } from "./HttpTool";
 import { PineconeVector } from "@mastra/pinecone";
 import { zValidator } from "@hono/zod-validator";
 import { createDocument } from "zod-openapi";
-import VectorQuerySchema from "./utils/vector-filter-schema";
 
 // Re-export the Chat class for Durable Objects
 export { Chat };
@@ -495,7 +494,7 @@ app.post(
       modelId: z.string().default("text-embedding-3-small"),
       pineconeApiKey: z.string(),
       indexName: z.string(),
-      filter: VectorQuerySchema,
+      topK: z.number().default(10),
     }),
     (result, c) => {
       if (!result.success) {
@@ -505,7 +504,7 @@ app.post(
   ),
   async (c) => {
     const data = c.req.valid("json");
-    const { query, modelId, pineconeApiKey, indexName, filter } = data;
+    const { query, modelId, pineconeApiKey, indexName, topK } = data;
     try {
       const { embedding } = await embed({
         value: query,
@@ -517,8 +516,7 @@ app.post(
       const results = await store.query({
         indexName: indexName,
         queryVector: embedding,
-        topK: 10,
-        filter: filter,
+        topK: topK,
       });
       return c.json(results);
     } catch (error) {
@@ -553,14 +551,15 @@ app.get("/rag/doc", async (c) => {
                   modelId: z
                     .string()
                     .default("text-embedding-3-small")
-                    .openapi({ description: "model id" }),
+                    .openapi({ description: "OpenAI embedding model" }),
                   pineconeApiKey: z
                     .string()
                     .openapi({ description: "pinecone api key" }),
                   indexName: z.string().openapi({ description: "index name" }),
-                  filter: VectorQuerySchema.openapi({
-                    description: "filter",
-                  }),
+                  topK: z
+                    .number()
+                    .default(10)
+                    .openapi({ description: "top k" }),
                 }),
               },
             },

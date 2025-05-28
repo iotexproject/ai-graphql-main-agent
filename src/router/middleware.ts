@@ -22,7 +22,7 @@ interface Env {
  * API Key认证中间件
  */
 export const apiKeyMiddleware = async (c: Context<{ Bindings: Env }>, next: Next) => {
-  const kvStore = createKVStore(c.env.CHAT_CACHE);
+  const kvStore = createKVStore(c.env.CHAT_CACHE as KVNamespace);
 
   const options: RateLimitOptions = {
     windowMs: 60 * 1000, // 1 分钟

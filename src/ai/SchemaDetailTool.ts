@@ -1,6 +1,6 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import { handleSchemaDetails } from "./utils/tool-handlers";
+import { handleSchemaDetails } from "../utils/tool-handlers";
 
 // 创建Schema详情工具
 export const SchemaDetailsTool = createTool({

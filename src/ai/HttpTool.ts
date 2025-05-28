@@ -1,7 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import axios from 'axios';
-import { KVCache } from "./utils/kv";
+import { KVCache } from "../utils/kv";
 
 // 定义返回类型接口
 interface HttpSuccessResponse {
@@ -49,7 +49,7 @@ export const handleHTTPRequest = async ({url, method, headers = {}, body, params
   try {
     // Extract parameters
     console.log({ url, method, headers, params });
-    console.log((body), 'HTTP BODY!!!!!!!!!!!!!!!!!');
+    console.log((body), 'HTTP BODY');
     if (body?.headers) {
       headers = body.headers;
     }
@@ -72,7 +72,7 @@ export const handleHTTPRequest = async ({url, method, headers = {}, body, params
           params
         });
 
-        console.log(JSON.stringify(response.data), 'HTTP RES!!!!!!!!!!!!!!!!!');
+        console.log(JSON.stringify(response.data), 'HTTP RES');
         return {
           data: response.data,
           error: false

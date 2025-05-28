@@ -46,7 +46,6 @@ interface Env {
   CHAT_CACHE?: KVNamespace; // KV namespace for caching
   Chat: DurableObjectNamespace;
   POLAR_ACCESS_TOKEN?: string;
-  GATEWAY_PROJECT_ID: string;
   USERSESSION: DurableObjectNamespace<UserSession>;
 }
 
@@ -177,11 +176,10 @@ const apiKeyMiddleware = async (c: Context, next: Next) => {
     // const cost = projectPrice || 1;
     const cost = 1;
     const apiKeyManager = getApiKeyManager(c.env as any);
-    const GATEWAY_PROJECT_ID = c.env.GATEWAY_PROJECT_ID;
     const result = await apiKeyManager.verifyKey({
       resourceId: orgId,
       cost,
-      projectId: GATEWAY_PROJECT_ID,
+      projectSlug: 'quicksilver',
     });
     if (!result.success) {
       return c.json(

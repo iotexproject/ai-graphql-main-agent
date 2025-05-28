@@ -20,19 +20,19 @@ export class ApiUsage extends DurableObject<Env> {
     remaining: number = 0
     isInitialized: boolean = false
     resourceId: string =''
-    projectId: string = ''
+    projectSlug: string = ''
     constructor(ctx: DurableObjectState, env: Env) {
       // Required, as we're extending the base class.
       super(ctx, env)
       this.apiKeyManager = getApiKeyManager(env)
     }
 
-    async init ({resourceId, projectId}: {resourceId: string, projectId: string}) {
+    async init ({resourceId, projectSlug}: {resourceId: string, projectSlug: string}) {
         if (this.isInitialized) {
             return
         }
         this.resourceId = resourceId
-        this.projectId = projectId
+        this.projectSlug = projectSlug
         await this.ctx.blockConcurrencyWhile(async () => {
             // After initialization, future reads do not need to access storage.
             const [cost, lastVerifyTime, remaining ] = await Promise.all([
@@ -58,7 +58,7 @@ export class ApiUsage extends DurableObject<Env> {
         try {
             const keyInfo = await this.apiKeyManager.getKeyState({
                 resourceId: this.resourceId,
-                projectId: this.projectId
+                projectSlug: this.projectSlug
             })
             this.cost = keyInfo.cost
             this.lastVerifyTime = keyInfo.lastVerifyTime
@@ -80,7 +80,7 @@ export class ApiUsage extends DurableObject<Env> {
         if (needRemoteVerify) {
             const keyInfo = await this.apiKeyManager.getKeyState({
                 resourceId: this.resourceId,
-                projectId: this.projectId
+                projectSlug: this.projectSlug
             })
             this.lastVerifyTime = keyInfo.lastVerifyTime
             if (keyInfo.remaining - sumCost < 0) {
@@ -100,7 +100,7 @@ export class ApiUsage extends DurableObject<Env> {
             await this.apiKeyManager.ingestEvent({
                 resourceId: this.resourceId,
                 cost: sumCost,
-                projectId: this.projectId
+                projectSlug: this.projectSlug
             })
         } else {
             if (this.remaining - sumCost < 0) {

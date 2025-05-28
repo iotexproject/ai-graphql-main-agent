@@ -1,8 +1,8 @@
 import { Agent } from "@mastra/core/agent";
-import { HttpTool } from "./HttpTool";
+import { HttpTool } from "./httpTool";
 import { KVCache } from "../utils/kv";
 import { DB } from "../utils/db";
-import { SchemaDetailsTool } from "./SchemaDetailTool";
+import { SchemaDetailsTool } from "./schemaDetailTool";
 import { getAI } from "../utils/ai";
 import { createErrorResponse } from "../utils/stream";
 
@@ -296,7 +296,7 @@ export class Chat {
 
           for await (const part of response.fullStream) {
             if (part.type === "text-delta") {
-              console.log("Text delta received:", part.textDelta);
+              // console.log("Text delta received:", part.textDelta);
               controller.enqueue(
                 encoder.encode(formatStreamingData(part.textDelta, streamId))
               );

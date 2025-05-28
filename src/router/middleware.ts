@@ -26,7 +26,7 @@ export const apiKeyMiddleware = async (c: Context<{ Bindings: Env }>, next: Next
 
   const options: RateLimitOptions = {
     windowMs: 60 * 1000, // 1 分钟
-    max: 1, // 每分钟最多 1 次请求
+    max: 5, // 每分钟最多 1 次请求
     store: kvStore,
     headers: true,
   };

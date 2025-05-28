@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { Chat } from "./ai/Chat";
+import { Chat } from "./ai/chat";
 import { KVCache } from "./utils/kv";
 import { DB } from "./utils/db";
 import type { UserSession } from "./storage/UserSession";
-import { MyMCP } from "./ai/Mcp";
+import { MyMCP } from "./ai/mcp";
 
 // Import route handlers
 import { handleUnifiedChat, handleGlobalChat } from "./router/chat";
@@ -15,7 +15,7 @@ import { apiKeyMiddleware } from "./router/middleware";
 export { Chat };
 export { ApiUsage } from "./storage/ApiUsage";
 export { UserSession } from "./storage/UserSession";
-export { MyMCP } from "./ai/Mcp";
+export { MyMCP } from "./ai/mcp";
 
 // Worker environment interface
 interface Env {

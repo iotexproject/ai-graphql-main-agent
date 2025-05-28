@@ -26,7 +26,6 @@ interface Env {
   CHAT_CACHE?: KVNamespace;
   Chat: DurableObjectNamespace;
   POLAR_ACCESS_TOKEN?: string;
-  GATEWAY_PROJECT_ID: string;
   USERSESSION: DurableObjectNamespace<UserSession>;
 }
 
@@ -35,8 +34,7 @@ type Variables = {
   projectId: string; 
   userId: string | null; 
   token: string | null; 
-};
-
+}
 // Create Hono app with proper typing
 const app = new Hono<{
   Bindings: Env;

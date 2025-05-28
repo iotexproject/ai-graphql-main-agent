@@ -65,8 +65,8 @@ export class ApiKeyManager {
     }
 
 
-    getKey(resourceId: string, projectId: string) {
-        return `${resourceId}-${projectId}`
+    getKey(resourceId: string, projectSlug: string) {
+        return `${resourceId}-${projectSlug}`
     }
 
     // getLockKey(key: string) {
@@ -173,19 +173,19 @@ export class ApiKeyManager {
      * @returns Created product
      */
     createProjectProduct = async ({
-        projectId,
+        projectSlug,
         monthPrice,
         monthCredit,
         productTag
     }: {
-        projectId: string,
+        projectSlug: string,
         monthPrice?: number,
         monthCredit: number,
         productTag: string
     }) => {
-        const productName = `${projectId}-${productTag}`
+        const productName = `${projectSlug}-${productTag}`
         const meter = await this.createProjectMeter({
-            meterName: projectId
+            meterName: projectSlug
         })
         const [benefit, product] = await Promise.all([this.createProjectCredit({
             creditName: productName,
@@ -241,9 +241,9 @@ export class ApiKeyManager {
      * @param resourceId User ID to check state for
      * @returns Key state with cost, remaining balance and verification time
      */
-    getKeyState = async ({ resourceId, projectId }: { resourceId: string, projectId: string }) => {
+    getKeyState = async ({ resourceId, projectSlug }: { resourceId: string, projectSlug: string }) => {
         const apiUsageMeter = await this.polarClient.meters.list({
-            query: projectId
+            query: projectSlug
         })
         const result = await this.polarClient.customers.getStateExternal({
             externalId: resourceId
@@ -264,11 +264,11 @@ export class ApiKeyManager {
         }
     }
 
-    ingestEvent = async ({ resourceId, cost, projectId }: { resourceId: string, cost: number, projectId: string }) => {
+    ingestEvent = async ({ resourceId, cost, projectSlug }: { resourceId: string, cost: number, projectSlug: string }) => {
         await this.polarClient.events.ingest({
             events: [
                 {
-                    name: projectId,
+                    name: projectSlug,
                     metadata: {
                         cost
                     },
@@ -278,11 +278,11 @@ export class ApiKeyManager {
         })
     }
 
-    verifyKeyFromRemote = async ({ resourceId, cost, projectId }: { resourceId: string, cost: number, projectId: string }) => {
+    verifyKeyFromRemote = async ({ resourceId, cost, projectSlug }: { resourceId: string, cost: number, projectSlug: string }) => {
         // Send usage event to remote service
-        await this.ingestEvent({ resourceId, cost, projectId })
+        await this.ingestEvent({ resourceId, cost, projectSlug })
         // Get updated key state after reporting usage
-        const keyInfo = await this.getKeyState({ resourceId, projectId })
+        const keyInfo = await this.getKeyState({ resourceId, projectSlug })
         return keyInfo
     }
 
@@ -294,13 +294,13 @@ export class ApiKeyManager {
      * @param cost Usage cost to apply
      * @returns True if key is valid, throws error if usage exceeded
      */
-    verifyKey = async ({ resourceId, cost, projectId }: { resourceId: string, cost: number, projectId: string }) => {
-        const key = this.getKey(resourceId, projectId)
+    verifyKey = async ({ resourceId, cost, projectSlug }: { resourceId: string, cost: number, projectSlug: string }) => {
+        const key = this.getKey(resourceId, projectSlug)
         const apiUsageId = this.env.APIUSAGE.idFromName(key)
         const apiUsage = this.env.APIUSAGE.get(apiUsageId)
         await apiUsage.init({
             resourceId,
-            projectId
+            projectSlug
         })
         return await apiUsage.consumeApiUsage({
             cost
@@ -317,8 +317,8 @@ export class ApiKeyManager {
     //  * @param cost Usage cost to apply
     //  * @returns True if key is valid, throws error if usage exceeded
     //  */
-    // verifyKey = async ({ resourceId, cost, projectId }: { resourceId: string, cost: number, projectId: string }) => {
-    //     const key = this.getKey(resourceId, projectId)
+    // verifyKey = async ({ resourceId, cost, projectSlug }: { resourceId: string, cost: number, projectSlug: string }) => {
+    //     const key = this.getKey(resourceId, projectSlug)
     //     const apiUsageId = this.env.ApiUsage.idFromName(key)
     //     const apiUsage = this.env.ApiUsage.get(apiUsageId)
     //     /**
@@ -346,7 +346,7 @@ export class ApiKeyManager {
 
     //                 } else {
     //                     await this.cache.set(this.getLockKey(key), 'true')
-    //                     const remoteKeyInfo = await this.verifyKeyFromRemote({ resourceId, cost: keyInfo.cost + cost, projectId })
+    //                     const remoteKeyInfo = await this.verifyKeyFromRemote({ resourceId, cost: keyInfo.cost + cost, projectSlug })
     //                     await this.cache.set(key, remoteKeyInfo)
     //                     await this.cache.set(this.getLockKey(key), 'false')
     //                 }
@@ -364,7 +364,7 @@ export class ApiKeyManager {
     //             } else {
     //                 await this.cache.set(this.getLockKey(key), 'true')
     //                 // Initialize cache for a new key with remote verification
-    //                 const remoteKeyInfo = await this.verifyKeyFromRemote({ resourceId, cost, projectId })
+    //                 const remoteKeyInfo = await this.verifyKeyFromRemote({ resourceId, cost, projectSlug })
     //                 this.cache.set(key, remoteKeyInfo)
     //                 await this.cache.set(this.getLockKey(key), 'false')
     //             }

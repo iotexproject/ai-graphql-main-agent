@@ -22,11 +22,11 @@ interface Env {
  * API Key认证中间件
  */
 export const apiKeyMiddleware = async (c: Context<{ Bindings: Env }>, next: Next) => {
-  const kvStore = createKVStore(c.env.CHAT_CACHE!);
+  const kvStore = createKVStore(c.env.CHAT_CACHE);
 
   const options: RateLimitOptions = {
     windowMs: 60 * 1000, // 1 分钟
-    max: 5, // 每分钟最多 1 次请求
+    max: 1, // 每分钟最多 100 次请求
     store: kvStore,
     headers: true,
   };
@@ -39,6 +39,7 @@ export const apiKeyMiddleware = async (c: Context<{ Bindings: Env }>, next: Next
 
   // 如果超过限制，则根据apikey进行验证
   if (!rateLimitResult.success) {
+
     // Extract token from Authorization header
     const authHeader = c.req.header("Authorization") || "";
     let token = "";
@@ -57,12 +58,38 @@ export const apiKeyMiddleware = async (c: Context<{ Bindings: Env }>, next: Next
         401
       );
     }
+    // const projectId = c.req.param("projectId")!
+    // if (!projectId) {
+    //   return c.json(
+    //     {
+    //       error: {
+    //         message: "Missing Project ID",
+    //         type: "authentication_error",
+    //         code: "invalid_parameters",
+    //       },
+    //     },
+    //     400
+    //   );
+    // }
+    // const projectPrice = await KVCache.wrap(
+    //   `project_price_${projectId}`,
+    //   async () => {
+    //     const projectPrice = await DB.query(
+    //       `SELECT pricing->>'price' as price FROM projects WHERE id = $1`,
+    //       [token]
+    //     );
+    //     return projectPrice?.rows[0]?.price;
+    //   },
+    //   {
+    //     ttl: 60,
+    //   }
+    // );
 
-    const apikey = token;
+
+    const apikey = token
     const userSessionId = c.env.USERSESSION.idFromName(apikey);
     const userSessionDO = c.env.USERSESSION.get(userSessionId);
     const { orgId } = await userSessionDO.init({ apiKey: apikey });
-    
     if (!orgId) {
       return c.json(
         {
@@ -75,16 +102,14 @@ export const apiKeyMiddleware = async (c: Context<{ Bindings: Env }>, next: Next
         401
       );
     }
-    
+    // const cost = projectPrice || 1;
     const cost = 1;
     const apiKeyManager = getApiKeyManager(c.env as any);
-    const GATEWAY_PROJECT_ID = c.env.GATEWAY_PROJECT_ID;
     const result = await apiKeyManager.verifyKey({
       resourceId: orgId,
       cost,
-      projectId: GATEWAY_PROJECT_ID,
+      projectSlug: 'quicksilver',
     });
-    
     if (!result.success) {
       return c.json(
         {
@@ -98,9 +123,7 @@ export const apiKeyMiddleware = async (c: Context<{ Bindings: Env }>, next: Next
       );
     }
   }
-  
   await next();
-  
   if (rateLimitResult.success) {
     // 请求完成后更新计数（如果需要）
     const skip = shouldSkipCounting(c, options);

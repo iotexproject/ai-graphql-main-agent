@@ -20,7 +20,10 @@ import { handleHTTPRequest } from "./HttpTool";
 import { PineconeVector } from "@mastra/pinecone";
 import { zValidator } from "@hono/zod-validator";
 import { createDocument } from "zod-openapi";
-
+import { cloudflareRateLimiter, WorkersKVStore } from "@hono-rate-limiter/cloudflare";
+import { rateLimiter } from "hono-rate-limiter";
+import { updateRateLimit, setRateLimitHeaders, shouldSkipCounting, RateLimitOptions, checkRateLimit } from "./middleware/ratelimit";
+import { createKVStore } from "./middleware/ratelimit";
 // Re-export the Chat class for Durable Objects
 export { Chat };
 export { ApiUsage } from "./storage/ApiUsage";
@@ -91,78 +94,114 @@ interface ChatResponse {
 }
 
 const apiKeyMiddleware = async (c: Context, next: Next) => {
-  // Extract token from Authorization header
-  const authHeader = c.req.header("Authorization") || "";
-  let token = "";
-  if (authHeader.startsWith("Bearer ")) {
-    token = authHeader.substring(7);
-    c.set("token", token);
-  }
-  if (!token) {
-    return c.json(
-      {
-        error: {
-          message: "Authentication error: Missing token",
-          type: "authentication_error",
-          code: "invalid_parameters",
-        },
-      },
-      401
-    );
-  }
+  const kvStore = createKVStore(c.env.CHAT_CACHE);
 
-  const projectPrice = await KVCache.wrap(
-    `project_price_${token}`,
-    async () => {
-      const projectPrice = await DB.query(
-        `SELECT pricing->>'price' as price FROM projects WHERE id = $1`,
-        [token]
-      );
-      return projectPrice?.rows[0]?.price;
-    },
-    {
-      ttl: 60,
+  const options: RateLimitOptions = {
+    windowMs: 60 * 1000, // 1 分钟
+    max: 1, // 每分钟最多 100 次请求
+    store: kvStore,
+    headers: true,
+  };
+
+  // 检查速率限制
+  const rateLimitResult = await checkRateLimit(c, options);
+
+  // 设置响应头部
+  setRateLimitHeaders(c, rateLimitResult, options);
+
+  // 如果超过限制，则根据apikey进行验证
+  if (!rateLimitResult.success) {
+
+    // Extract token from Authorization header
+    const authHeader = c.req.header("Authorization") || "";
+    let token = "";
+    if (authHeader.startsWith("Bearer ")) {
+      token = authHeader.substring(7);
     }
-  );
-
-  const apikey = c.req.header("x-api-key");
-  if (!apikey) {
-    return c.json(
-      {
-        error: {
-          message: "Authentication error: Missing API Key",
-          type: "authentication_error",
-          code: "invalid_parameters",
+    if (!token) {
+      return c.json(
+        {
+          error: {
+            message: "Authentication error: Missing API Key",
+            type: "authentication_error",
+            code: "invalid_parameters",
+          },
         },
-      },
-      401
-    );
-  }
-  const userSessionId = c.env.USERSESSION.idFromName(apikey);
-  const userSessionDO = c.env.USERSESSION.get(userSessionId);
-  const { userId } = await userSessionDO.init({ apiKey: apikey });
+        401
+      );
+    }
+    // const projectId = c.req.param("projectId")!
+    // if (!projectId) {
+    //   return c.json(
+    //     {
+    //       error: {
+    //         message: "Missing Project ID",
+    //         type: "authentication_error",
+    //         code: "invalid_parameters",
+    //       },
+    //     },
+    //     400
+    //   );
+    // }
+    // const projectPrice = await KVCache.wrap(
+    //   `project_price_${projectId}`,
+    //   async () => {
+    //     const projectPrice = await DB.query(
+    //       `SELECT pricing->>'price' as price FROM projects WHERE id = $1`,
+    //       [token]
+    //     );
+    //     return projectPrice?.rows[0]?.price;
+    //   },
+    //   {
+    //     ttl: 60,
+    //   }
+    // );
 
-  if (!userId) {
-    return c.json(
-      {
-        error: {
-          message: "Authentication error: Unauthorized API Key",
-          type: "authentication_error",
-          code: "invalid_parameters",
+
+    const apikey = token
+    const userSessionId = c.env.USERSESSION.idFromName(apikey);
+    const userSessionDO = c.env.USERSESSION.get(userSessionId);
+    const { orgId } = await userSessionDO.init({ apiKey: apikey });
+    if (!orgId) {
+      return c.json(
+        {
+          error: {
+            message: "Authentication error: Unauthorized API Key",
+            type: "authentication_error",
+            code: "invalid_parameters",
+          },
         },
-      },
-      401
-    );
+        401
+      );
+    }
+    // const cost = projectPrice || 1;
+    const cost = 1;
+    const apiKeyManager = getApiKeyManager(c.env as any);
+    const GATEWAY_PROJECT_ID = c.env.GATEWAY_PROJECT_ID;
+    const result = await apiKeyManager.verifyKey({
+      resourceId: orgId,
+      cost,
+      projectId: GATEWAY_PROJECT_ID,
+    });
+    if (!result.success) {
+      return c.json(
+        {
+          error: {
+            message: result.message,
+            type: "rate_limit_error",
+            code: "rate_limit_exceeded",
+          },
+        },
+        429
+      );
+    }
   }
-  const cost = projectPrice || 1;
-  const apiKeyManager = getApiKeyManager(c.env as any);
-  const projectId = c.env.GATEWAY_PROJECT_ID;
-  await apiKeyManager.verifyKey({
-    userId,
-    cost,
-    projectId,
-  });
   await next();
+  if (rateLimitResult.success) {
+    // 请求完成后更新计数（如果需要）
+    const skip = shouldSkipCounting(c, options);
+    await updateRateLimit(c, options, skip);
+  }
 };
 
 // Create Hono app
@@ -436,15 +475,14 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
     });
   }
 }
-
-app.use("/v1/chat/completions", apiKeyMiddleware);
-app.post("/v1/chat/completions", async (c) => {
+app.use(":projectId/v1/chat/completions", apiKeyMiddleware);  
+app.post(":projectId/v1/chat/completions", async (c) => {
   try {
-    const token = c.get("token")!;
+    const projectId = c.req.param("projectId");
     // If no token, return error
 
     // Create a Durable Object ID based on the token
-    const chatId = c.env.Chat.idFromName(token);
+    const chatId = c.env.Chat.idFromName(projectId);
 
     // Get the Durable Object stub
     const chatDO = c.env.Chat.get(chatId);
@@ -459,7 +497,7 @@ app.post("/v1/chat/completions", async (c) => {
     });
 
     // Pass token
-    newRequest.headers.set("X-Custom-Token", token);
+    newRequest.headers.set("X-Custom-Token", projectId);
 
     // Forward the request to the Durable Object
     const response = await chatDO.fetch(newRequest);
@@ -588,7 +626,6 @@ app.get("/rag/doc", async (c) => {
   });
   return c.json(document);
 });
-
 app.mount("/", (req, env, ctx) => {
   // 从 headers 获取认证信息
   let authHeader = req.headers.get("authorization");
@@ -617,6 +654,8 @@ app.mount("/", (req, env, ctx) => {
 
   return MyMCP.mount("/sse").fetch(req, env, ctx);
 });
+
+
 
 // Chat endpoint
 

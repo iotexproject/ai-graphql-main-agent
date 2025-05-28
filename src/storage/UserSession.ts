@@ -15,6 +15,7 @@ interface Env {
   } 
 export class UserSession extends DurableObject<Env> {
     userId: string =''
+    orgId: string =''
     apiKey: string =''
     isInitialized: boolean = false
     lastSyncTime: number = 0
@@ -25,36 +26,45 @@ export class UserSession extends DurableObject<Env> {
 
     async init ({apiKey}: {apiKey: string}) {
         if (this.isInitialized) {
-            return {userId: this.userId}
+            return {orgId: this.orgId}
         }
         this.apiKey = apiKey
         await this.ctx.blockConcurrencyWhile(async () => {
             // After initialization, future reads do not need to access storage.
-            const [userId ] = await Promise.all([
+            const [orgId, userId] = await Promise.all([
+                this.ctx.storage.get<string>("orgId"),
                 this.ctx.storage.get<string>("userId"),
             ])
-            if (!userId || Date.now() - this.lastSyncTime > 1000 * 60 * 60) {
+            if (!orgId || !userId || Date.now() - this.lastSyncTime > 1000 * 60 * 60) {
                await this.syncFromRemote()
             } else {
+                this.orgId = orgId
                 this.userId = userId
             }
-        
-            this.isInitialized = true
+            if (orgId && userId) {
+                this.isInitialized = true
+            }
         });
-        return {userId: this.userId}
+        return {userId: this.userId, orgId: this.orgId}
     }
 
 
     async syncFromRemote() {
         try {
-            const userIdResult = await DB.query("SELECT user_id FROM apikey_rapid WHERE key = $1", [this.apiKey])
+            const userIdResult = await DB.query("SELECT user_id, org_id FROM apikey_rapid WHERE key = $1", [this.apiKey])
             const userId = userIdResult?.rows[0]?.user_id
-            this.userId = userId
-            this.lastSyncTime = Date.now()
-            await Promise.all([
-                this.ctx.storage.put("userId", userId),
-                this.ctx.storage.put("lastSyncTime", this.lastSyncTime)
-            ])
+            const orgId = userIdResult?.rows[0]?.org_id
+            if (orgId && userId) { 
+                this.userId = userId
+                this.orgId = orgId
+                this.lastSyncTime = Date.now()
+                await Promise.all([
+                    this.ctx.storage.put("orgId", orgId),
+                    this.ctx.storage.put("userId", userId),
+                    this.ctx.storage.put("lastSyncTime", this.lastSyncTime)
+                ])
+            }
+          
         } catch (error) { 
             console.error('syncFromRemote error', error)
         }

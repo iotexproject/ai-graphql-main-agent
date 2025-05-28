@@ -19,7 +19,7 @@ export class ApiUsage extends DurableObject<Env> {
     lastVerifyTime: number = Date.now()
     remaining: number = 0
     isInitialized: boolean = false
-    userId: string =''
+    resourceId: string =''
     projectId: string = ''
     constructor(ctx: DurableObjectState, env: Env) {
       // Required, as we're extending the base class.
@@ -27,11 +27,11 @@ export class ApiUsage extends DurableObject<Env> {
       this.apiKeyManager = getApiKeyManager(env)
     }
 
-    async init ({userId, projectId}: {userId: string, projectId: string}) {
+    async init ({resourceId, projectId}: {resourceId: string, projectId: string}) {
         if (this.isInitialized) {
             return
         }
-        this.userId = userId
+        this.resourceId = resourceId
         this.projectId = projectId
         await this.ctx.blockConcurrencyWhile(async () => {
             // After initialization, future reads do not need to access storage.
@@ -57,7 +57,7 @@ export class ApiUsage extends DurableObject<Env> {
     async syncFromRemote() {
         try {
             const keyInfo = await this.apiKeyManager.getKeyState({
-                userId: this.userId,
+                resourceId: this.resourceId,
                 projectId: this.projectId
             })
             this.cost = keyInfo.cost
@@ -79,13 +79,16 @@ export class ApiUsage extends DurableObject<Env> {
         const needRemoteVerify = sumCost >= 100 || Date.now() - this.lastVerifyTime > 1000 * 60 * 5
         if (needRemoteVerify) {
             const keyInfo = await this.apiKeyManager.getKeyState({
-                userId: this.userId,
+                resourceId: this.resourceId,
                 projectId: this.projectId
             })
             this.lastVerifyTime = keyInfo.lastVerifyTime
             if (keyInfo.remaining - sumCost < 0) {
                 await this.ctx.storage.put("lastVerifyTime", this.lastVerifyTime)
-                throw new Error('ApiUsage is not enough')
+                return {
+                    success: false,
+                    message: 'Insufficient API Credits'
+                }
             }
             this.cost = 0
             this.remaining = keyInfo.remaining - sumCost
@@ -95,13 +98,16 @@ export class ApiUsage extends DurableObject<Env> {
                 this.ctx.storage.put("remaining", this.remaining),
             ])
             await this.apiKeyManager.ingestEvent({
-                userId: this.userId,
+                resourceId: this.resourceId,
                 cost: sumCost,
                 projectId: this.projectId
             })
         } else {
             if (this.remaining - sumCost < 0) {
-                throw new Error('ApiUsage is not enough')
+                return {
+                    success: false,
+                    message: 'Insufficient API Credits'
+                }
             }
             this.cost = sumCost
             await Promise.all([
@@ -110,5 +116,9 @@ export class ApiUsage extends DurableObject<Env> {
         }
         this.cost = sumCost
         console.log('consumeApiUsage', this.cost, this.remaining, this.lastVerifyTime)
+        return {
+            success: true,
+            message: 'API Credits Consumed'
+        }
     }
   }

@@ -429,6 +429,7 @@ Regarding schema information usage and caching:
     let remoteSchemasInfo = "";
     if (remoteSchemas && remoteSchemas.length > 0) {
       const remoteSchemasText = remoteSchemas
+        .filter((remoteSchema) => remoteSchema.schemaData && remoteSchema.schemaData.rootFields)
         .map((remoteSchema) => {
           const fieldsText = remoteSchema.schemaData.rootFields
             .map((field) => `  - ${field.name}${field.description ? `: ${field.description}` : ""}`)

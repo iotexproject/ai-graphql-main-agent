@@ -118,11 +118,11 @@ export const HttpTool = createTool({
   id: "http-request",
   description: "Make HTTP requests to external APIs",
   inputSchema: z.object({
-    url: z.string(),
-    method: z.string().default("GET"),
-    headers: z.record(z.string()).optional(),
-    body: z.any().optional(),
-    params: z.record(z.string()).optional(),
+    url: z.string().describe("The URL to make the request to"),
+    method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH"]).default("GET").describe("The HTTP method to use"),
+    headers: z.record(z.string()).optional().describe("HTTP headers to include in the request"),
+    body: z.any().optional().describe("The request body (for POST, PUT, etc.)"),
+    params: z.record(z.string()).optional().describe("URL query parameters"),
   }),
   outputSchema: z.object({
     data: z.any(),

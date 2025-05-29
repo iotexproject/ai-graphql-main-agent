@@ -25,8 +25,8 @@ export const apiKeyMiddleware = async (c: Context<{ Bindings: Env }>, next: Next
   const kvStore = createKVStore(c.env.CHAT_CACHE as KVNamespace);
 
   const options: RateLimitOptions = {
-    windowMs: 60 * 1000, // 1 分钟
-    max: 1, // 每分钟最多 100 次请求
+    windowMs: 60 * 1000, // 1 min
+    max: 5, 
     store: kvStore,
     headers: true,
   };

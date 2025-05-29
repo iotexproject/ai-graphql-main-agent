@@ -25,6 +25,7 @@ class_name = "MyMCP"
 # Durable Objects迁移
 [[migrations]]
 tag = "v2"
+new_classes = ["Chat", "ApiUsage", "UserSession"]
 new_sqlite_classes = ["MyMCP"]
 
 # KV绑定 - 用于缓存marketplace数据

@@ -1,0 +1,14 @@
+name = "rag-worker"
+main = "src/index.ts"
+compatibility_date = "2025-02-04"
+compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
+
+# KV绑定 - 用于缓存
+[[kv_namespaces]]
+binding = "CHAT_CACHE"
+id = "48a9d87921df46eb9a5d9bf71302b83d"
+preview_id = "e073d6bb683145ca971c0dc3790c787b"
+
+[observability]
+enabled = true
+head_sampling_rate = 1 

@@ -38,7 +38,7 @@ function generateCacheKey(url: string, method: string, headers: Record<string, s
   return `http_cache_${Buffer.from(JSON.stringify(requestData)).toString('base64')}`;
 }
 
-export const handleHTTPRequest = async ({url, method, headers = {}, body, params, env}: {
+export const handleHTTPRequest = async ({ url, method, headers = {}, body, params, env }: {
   url: string;
   method: string;
   headers?: Record<string, string>;
@@ -128,14 +128,23 @@ export const HttpTool = createTool({
     data: z.any(),
   }),
   execute: async ({ context }) => {
-    const result = await handleHTTPRequest(context);
-    
-    if (result.error === true) {
-      throw new Error(result.message);
+    try {
+      const result = await handleHTTPRequest(context);
+
+      if (result.error === true) {
+        throw new Error(result.message);
+      }
+
+      return {
+        data: result.data
+      };
+    } catch (error) {
+      console.error('HTTP Tool Error:', error);
+      return {
+        data: null,
+        error: true,
+        message: 'HTTP Tool Error'
+      };
     }
-    
-    return {
-      data: result.data
-    };
   },
 }); 

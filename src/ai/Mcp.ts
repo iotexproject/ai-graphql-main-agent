@@ -11,7 +11,7 @@ import { handleHTTPRequest } from "./httpTool";
 
 type Bindings = Env;
 type Props = {
-  bearerToken: string;
+  projectId: string;
 };
 type State = null;
 
@@ -33,15 +33,16 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
     );
 
     this.server.setRequestHandler(ListToolsRequestSchema, async (request) => {
-      const token = this.props.bearerToken || "";
-
-      if (!token) {
-        throw new Error("Missing authorization token");
+      console.log(request, "request");
+      const projectId = this.props.projectId || "";
+      console.log(projectId, "projectId");
+      if (!projectId) {
+        throw new Error("Missing projectId");
       }
 
       // Handle schema list using common function
       const result = await handleListSchemas({
-        token,
+        projectId,
         marketplaceId: "",
         forDescription: true,
         env: this.env,
@@ -125,14 +126,14 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       console.log(request.params);
       const args = request.params.arguments || {};
-      const token = this.props.bearerToken || "";
+      const projectId = this.props.projectId || "";
 
-      if (!token) {
+      if (!projectId) {
         return {
           content: [
             {
               type: "text",
-              text: "Error: Authorization token is required to use tools",
+              text: "Error: Project ID is required to use tools",
             },
           ],
         };
@@ -143,7 +144,7 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
           try {
             // Handle schema list using common function
             const result = await handleListSchemas({
-              token,
+              projectId,
               marketplaceId: "",
               forDescription: false,
               env: this.env,

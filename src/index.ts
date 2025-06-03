@@ -69,24 +69,29 @@ app.get("/rag/doc", handleRagDoc);
 
 // MCP route with authentication handling
 app.mount("/", (req, env, ctx) => {
-  let authHeader = req.headers.get("authorization");
   const url = new URL(req.url);
   const authParam = url.searchParams.get("authorization");
+  console.log(authParam, "authParam");
+
+  // 从URL路径中提取projectId
+  const pathSegments = url.pathname.split('/').filter(Boolean);
+  let projectId = "";
   
-  if (authParam) {
-    authHeader = authParam.startsWith("Bearer ") ? authParam : `Bearer ${authParam}`;
+  // 如果路径是 /:projectId/sse 格式，提取projectId
+  if (pathSegments.length >= 2 && pathSegments[1] === 'sse') {
+    projectId = pathSegments[0];
+    console.log(projectId, "extracted projectId from URL path");
   }
-  
-  console.log(authHeader, "authHeader");
+
   ctx.props = {};
   
-  if (authHeader) {
-    ctx.props.bearerToken = authHeader.startsWith("Bearer ") 
-      ? authHeader.substring(7) 
-      : authHeader;
+  if (authParam) {
+    ctx.props.projectId = authParam;
+  } else if (projectId) {
+    ctx.props.projectId = projectId;
   }
-  
-  return MyMCP.mount("/sse").fetch(req, env, ctx);
+
+  return MyMCP.mount("/").fetch(req, env, ctx);
 });
 
 export default {

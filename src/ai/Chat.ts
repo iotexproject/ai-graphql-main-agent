@@ -436,7 +436,7 @@ Regarding schema information usage and caching:
             .join("\n");
 
           return `- ${remoteSchema.name} (ID: ${remoteSchema.id}, used as the remoteSchemaId parameter when calling SchemaDetailsTool), 
-        Graphql endpoint: https://quicksilver.iotex.me/graphql-main-worker \n${fieldsText}`;
+        Graphql endpoint: https://graphql-main-worker.iotex-dev.workers.dev/graphql \n${fieldsText}`;
         })
         .join("\n\n");
 

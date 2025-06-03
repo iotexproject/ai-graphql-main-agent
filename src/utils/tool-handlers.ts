@@ -51,7 +51,7 @@ export interface HttpRequestResult {
 /**
  * 从KV缓存或数据库获取所有相关Schema
  */
-export async function getSchemasByToken(token: string, env?: any) {
+export async function getSchemasByProjectId(projectId: string, env?: any) {
   try {
     // 初始化KV缓存和数据库工具
     if (env?.CHAT_CACHE) {
@@ -63,9 +63,9 @@ export async function getSchemasByToken(token: string, env?: any) {
     }
     
     return await KVCache.wrap(
-      `remoteSchemas_project_${token}`,
+      `remoteSchemas_project_${projectId}`,
       async () => {
-        return await DB.getRemoteSchemasFromProjectId(token);
+        return await DB.getRemoteSchemasFromProjectId(projectId);
       },
       {
         ttl: 60 * 60, // 1小时缓存
@@ -250,21 +250,21 @@ export interface ListSchemasResult {
 }
 
 export async function handleListSchemas(params: {
-  token: string;
+  projectId: string;
   marketplaceId?: string;
   forDescription?: boolean;
   env?: any;
 }): Promise<ListSchemasResult> {
   try {
-    const { token, marketplaceId, forDescription = false, env } = params;
+    const { projectId, marketplaceId, forDescription = false, env } = params;
     
     // 获取Schema信息
     let remoteSchemas: any[] = [];
     
     if (marketplaceId) {
-    } else if (token) {
+    } else if (projectId) {
       // 使用token获取所有相关schema
-      remoteSchemas = await getSchemasByToken(token, env);
+      remoteSchemas = await getSchemasByProjectId(projectId, env);
     }
     
     if (remoteSchemas.length === 0) {
@@ -323,7 +323,7 @@ ${fieldsText}
 3. 使用http_request工具发送GraphQL查询:
    * url: "https://ai-platform-graphql-frontend.onrender.com/graphql-main-worker"
    * method: "POST"
-   * headers: { "Content-Type": "application/json", ${marketplaceId ? `"x-marketplace-id": "${marketplaceId}"` : ''} ${token ? `${marketplaceId ? ', ' : ''}"x-project-id": "${token}"` : ''} }
+   * headers: { "Content-Type": "application/json", ${marketplaceId ? `"x-marketplace-id": "${marketplaceId}"` : ''} ${projectId ? `${marketplaceId ? ', ' : ''}"x-project-id": "${projectId}"` : ''} }
    * body: { "query": "your GraphQL query" }`;
 }).join('\n\n')}
 

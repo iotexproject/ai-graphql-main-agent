@@ -4,6 +4,8 @@ import type { UserSession } from "../storage/UserSession";
 import { updateRateLimit, setRateLimitHeaders, shouldSkipCounting, checkRateLimit } from "../middleware/ratelimit";
 import type { RateLimitOptions } from "../middleware/ratelimit";
 import { createKVStore } from "../middleware/ratelimit";
+import { DB } from "@/utils/db";
+import { KVCache } from "@/utils/kv";
 
 // Worker environment type definition
 interface Env {
@@ -22,23 +24,23 @@ interface Env {
  * API Key认证中间件
  */
 export const apiKeyMiddleware = async (c: Context<{ Bindings: Env }>, next: Next) => {
-  const kvStore = createKVStore(c.env.CHAT_CACHE as KVNamespace);
+  // const kvStore = createKVStore(c.env.CHAT_CACHE as KVNamespace);
 
-  const options: RateLimitOptions = {
-    windowMs: 60 * 1000, // 1 min
-    max: 5, 
-    store: kvStore,
-    headers: true,
-  };
+  // const options: RateLimitOptions = {
+  //   windowMs: 60 *60 * 1000, // 1 min
+  //   max: 5, 
+  //   store: kvStore,
+  //   headers: true,
+  // };
 
-  // 检查速率限制
-  const rateLimitResult = await checkRateLimit(c, options);
+  // // 检查速率限制
+  // const rateLimitResult = await checkRateLimit(c, options);
 
-  // 设置响应头部
-  setRateLimitHeaders(c, rateLimitResult, options);
+  // // 设置响应头部
+  // setRateLimitHeaders(c, rateLimitResult, options);
 
   // 如果超过限制，则根据apikey进行验证
-  if (!rateLimitResult.success) {
+  // if (!rateLimitResult.success) {
 
     // Extract token from Authorization header
     const authHeader = c.req.header("Authorization") || "";
@@ -58,32 +60,32 @@ export const apiKeyMiddleware = async (c: Context<{ Bindings: Env }>, next: Next
         401
       );
     }
-    // const projectId = c.req.param("projectId")!
-    // if (!projectId) {
-    //   return c.json(
-    //     {
-    //       error: {
-    //         message: "Missing Project ID",
-    //         type: "authentication_error",
-    //         code: "invalid_parameters",
-    //       },
-    //     },
-    //     400
-    //   );
-    // }
-    // const projectPrice = await KVCache.wrap(
-    //   `project_price_${projectId}`,
-    //   async () => {
-    //     const projectPrice = await DB.query(
-    //       `SELECT pricing->>'price' as price FROM projects WHERE id = $1`,
-    //       [token]
-    //     );
-    //     return projectPrice?.rows[0]?.price;
-    //   },
-    //   {
-    //     ttl: 60,
-    //   }
-    // );
+    const projectId = c.req.param("projectId")!
+    if (!projectId) {
+      return c.json(
+        {
+          error: {
+            message: "Missing Project ID",
+            type: "authentication_error",
+            code: "invalid_parameters",
+          },
+        },
+        400
+      );
+    }
+    const projectPrice = await KVCache.wrap(
+      `project_price_${projectId}`,
+      async () => {
+        const projectPrice = await DB.query(
+          `SELECT pricing->>'price' as price FROM projects WHERE id = $1`,
+          [projectId]
+        );
+        return projectPrice?.rows[0]?.price;
+      },
+      {
+        ttl: 60,
+      }
+    );
 
 
     const apikey = token
@@ -102,8 +104,8 @@ export const apiKeyMiddleware = async (c: Context<{ Bindings: Env }>, next: Next
         401
       );
     }
-    // const cost = projectPrice || 1;
-    const cost = 1;
+    const cost = projectPrice || 1;
+    // const cost = 1;
     const apiKeyManager = getApiKeyManager(c.env as any);
     const result = await apiKeyManager.verifyKey({
       resourceId: orgId,
@@ -122,11 +124,41 @@ export const apiKeyMiddleware = async (c: Context<{ Bindings: Env }>, next: Next
         429
       );
     }
+  // }
+  await next();
+  // if (rateLimitResult.success) {
+  //   // 请求完成后更新计数（如果需要）
+  //   const skip = shouldSkipCounting(c, options);
+  //   await updateRateLimit(c, options, skip);
+  // }
+}; 
+
+export const rateLimitMiddleware = async (c: Context<{ Bindings: Env }>, next: Next) => {
+  const kvStore = createKVStore(c.env.CHAT_CACHE as KVNamespace);
+
+  const options: RateLimitOptions = {
+    windowMs: 60 * 1000, // 1 min
+    max: 10, 
+    store: kvStore,
+    headers: true,
+  };
+  const rateLimitResult = await checkRateLimit(c, options);
+  setRateLimitHeaders(c, rateLimitResult, options);
+  if (!rateLimitResult.success) {
+    return c.json(
+      {
+        error: {
+          message: "Rate limit exceeded",
+          type: "rate_limit_error",
+          code: "rate_limit_exceeded",
+        },
+      },
+      429
+    );
   }
   await next();
   if (rateLimitResult.success) {
-    // 请求完成后更新计数（如果需要）
     const skip = shouldSkipCounting(c, options);
     await updateRateLimit(c, options, skip);
   }
-}; 
+}

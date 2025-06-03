@@ -9,7 +9,7 @@ import { MyMCP } from "./ai/mcp";
 // Import route handlers
 import { handleUnifiedChat, handleGlobalChat } from "./router/chat";
 import { ragValidator, handlePineconeRag, handleRagDoc } from "./router/rag";
-import { apiKeyMiddleware } from "./router/middleware";
+import { apiKeyMiddleware, rateLimitMiddleware } from "./router/middleware";
 
 // Re-export for Durable Objects
 export { Chat };
@@ -56,8 +56,11 @@ app.use("*", async (c, next) => {
   return next();
 });
 
+app.use("/preview/:projectId/v1/chat/completions", apiKeyMiddleware);  
+app.post("/preview/:projectId/v1/chat/completions", handleUnifiedChat);
+
 // Unified chat routes - handles both project and global chat
-app.use(":projectId/v1/chat/completions", apiKeyMiddleware);  
+app.use(":projectId/v1/chat/completions", rateLimitMiddleware);  
 app.post(":projectId/v1/chat/completions", handleUnifiedChat);
 
 // Global chat route (without projectId)

@@ -71,6 +71,45 @@ export class DB {
    * @param params 查询参数数组
    * @returns 查询结果
    */
+  static async queryInDO(
+    pool: Pool | null,
+    query: string,
+    params: any[] = []
+  ): Promise<QueryResult | null> {
+    try {
+      let innerPool: Pool | null = pool;
+      // 检查是否有连接字符串
+      if (!globalConnectionString) {
+        console.warn('Database connection string not provided');
+        return null;
+      }
+      if (!innerPool) {
+        const { Pool } = await import('pg');
+        // 获取数据库连接池
+        innerPool = new Pool({
+          connectionString: globalConnectionString,
+          // 可以根据需要调整连接池配置
+          max: 5, // 最大连接数
+          idleTimeoutMillis: 30000, // 连接最大空闲时间
+          connectionTimeoutMillis: 5000, // 连接超时
+        });
+      }
+
+      // 执行查询
+      const result = await innerPool.query(query, params);
+      return result;
+    } catch (error) {
+      console.error('Database query error:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 执行SQL查询
+   * @param query SQL查询字符串
+   * @param params 查询参数数组
+   * @returns 查询结果
+   */
   static async query(
     query: string,
     params: any[] = []
@@ -99,7 +138,8 @@ export class DB {
     console.log('getRemoteSchemasFromProjectId', projectId);
     try {
       // 执行查询获取所有marketplace记录
-      const result = await this.query(
+      const result = await this.queryInDO(
+        null,
         'SELECT id, name, description, endpoint, headers, "schemaData", "createdAt" FROM "remoteSchemas" WHERE "projectId" = $1',
         [projectId]
       );
@@ -125,7 +165,8 @@ export class DB {
   static async getRemoteSchemaById(remoteSchemaId: string): Promise<any | null> {
     try {
       // 执行查询获取指定ID的marketplace记录
-      const result = await this.query(
+      const result = await this.queryInDO(
+        null,
         'SELECT id, name, description, endpoint, headers, "schemaData", "createdAt" FROM "remoteSchemas" WHERE id = $1',
         [remoteSchemaId]
       );
@@ -151,19 +192,19 @@ export class DB {
   static async getPublishedProjects(): Promise<any[]> {
     try {
       // return await KVCache.wrap('getPublishedProjects-v4', async () => {
-        // 执行查询获取所有已发布的项目
-        const result = await this.query(
-          'SELECT id, name, description, "isPublished" FROM projects WHERE "isPublished" = true',
-          []
-        );
+      // 执行查询获取所有已发布的项目
+      const result = await this.query(
+        'SELECT id, name, description, "isPublished" FROM projects WHERE "isPublished" = true',
+        []
+      );
 
-        // 检查查询结果
-        if (result && result.rows && Array.isArray(result.rows)) {
-          console.log(`Found ${result.rows.length} published projects`);
-          return result.rows;
-        }
+      // 检查查询结果
+      if (result && result.rows && Array.isArray(result.rows)) {
+        console.log(`Found ${result.rows.length} published projects`);
+        return result.rows;
+      }
 
-        return [];
+      return [];
       // }, { ttl: 60 });
     } catch (error) {
       console.error('Error querying published projects from DB:', error);

@@ -63,11 +63,11 @@ export class ApiUsage extends DurableObject<Env> {
             this.cost = keyInfo.cost
             this.lastVerifyTime = keyInfo.lastVerifyTime
             this.remaining = keyInfo.remaining
-            await Promise.all([
-                this.ctx.storage.put("cost", this.cost),
-                this.ctx.storage.put("lastVerifyTime", this.lastVerifyTime),
-                this.ctx.storage.put("remaining", this.remaining),
-            ])
+            await this.ctx.storage.transaction(async (txn) => {
+                await txn.put("cost", this.cost)
+                await txn.put("lastVerifyTime", this.lastVerifyTime)
+                await txn.put("remaining", this.remaining)
+            })
         } catch (error) {
             console.error('syncFromRemote error', error)
         }
@@ -75,8 +75,8 @@ export class ApiUsage extends DurableObject<Env> {
     
 
     async consumeApiUsage({ cost }: { cost: number }) {
-        const sumCost = this.cost + cost
-        const needRemoteVerify = sumCost >= 100 || Date.now() - this.lastVerifyTime > 1000 * 60 * 5
+        const sumCost = Number(this.cost || 0) + Number(cost || 0)
+        const needRemoteVerify = sumCost >= 10 || Date.now() - this.lastVerifyTime > 1000 * 60 * 5
         if (needRemoteVerify) {
             const keyInfo = await this.apiKeyManager.getKeyState({
                 resourceId: this.resourceId,
@@ -85,9 +85,10 @@ export class ApiUsage extends DurableObject<Env> {
             this.lastVerifyTime = keyInfo.lastVerifyTime
             if (keyInfo.remaining - sumCost < 0) {
                 await this.ctx.storage.put("lastVerifyTime", this.lastVerifyTime)
+                console.log('remaining', this.remaining, 'sumCost', sumCost)
                 return {
                     success: false,
-                    message: 'Insufficient API Credits'
+                    message: 'Insufficient API Credits, please upgrade your plan'
                 }
             }
             this.cost = 0
@@ -104,9 +105,10 @@ export class ApiUsage extends DurableObject<Env> {
             })
         } else {
             if (this.remaining - sumCost < 0) {
+                console.log('remaining', this.remaining, 'sumCost', sumCost)
                 return {
                     success: false,
-                    message: 'Insufficient API Credits'
+                    message: 'Insufficient API Credits, please upgrade your plan'
                 }
             }
             this.cost = sumCost

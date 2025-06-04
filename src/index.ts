@@ -11,6 +11,8 @@ import { handleUnifiedChat, handleGlobalChat } from "./router/chat";
 import { ragValidator, handlePineconeRag, handleRagDoc } from "./router/rag";
 import { apiKeyMiddleware, rateLimitMiddleware } from "./router/middleware";
 
+// import { logger } from 'hono/logger'
+
 // Re-export for Durable Objects
 export { Chat };
 export { ApiUsage } from "./storage/ApiUsage";
@@ -55,6 +57,8 @@ app.use("*", async (c, next) => {
   KVCache.initialize(c.env.CHAT_CACHE);
   return next();
 });
+
+// app.use(logger());
 
 app.use("/preview/:projectId/v1/chat/completions", apiKeyMiddleware);  
 app.post("/preview/:projectId/v1/chat/completions", handleUnifiedChat);

@@ -59,8 +59,9 @@ const handleProjectChatLogic = async (c: Context<{ Bindings: Env; Variables: Var
       body: c.req.raw.body,
     });
     newRequest.headers.set("X-Project-Id", projectId);
-    const response = await chatDO.fetch(newRequest);
-    return new Response(response.body, response);
+    return chatDO.fetch(newRequest);
+    // console.log('response--------', response)
+    // return new Response(response.body, response);
   } catch (error) {
     console.error("Error in project chat:", error);
     return c.json(

@@ -2,6 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import axios from 'axios';
 import { KVCache } from "../utils/kv";
+import pRetry from 'p-retry';
 
 // 定义返回类型接口
 interface HttpSuccessResponse {
@@ -61,15 +62,20 @@ export const handleHTTPRequest = async ({ url, method, headers = {}, body, param
       cacheKey,
       async () => {
         // Make the request with axios
-        const response = await axios({
-          url,
-          method,
-          headers: {
-            'Content-Type': 'application/json',
-            ...headers,
-          },
-          data: body,
-          params
+        const response = await pRetry(async () => {
+          return await axios({
+            url,
+            method,
+            headers: {
+              'Content-Type': 'application/json',
+              ...headers,
+            },
+            data: body,
+            params,
+            signal: AbortSignal.timeout(10000)
+          });
+        }, {
+          retries: 3
         });
 
         console.log(JSON.stringify(response.data), 'HTTP RES');

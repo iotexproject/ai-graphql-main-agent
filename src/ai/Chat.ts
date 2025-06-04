@@ -97,6 +97,7 @@ export class Chat {
    * Main entry point for the Durable Object
    */
   async fetch(request: Request): Promise<Response> {
+
     this.request = request;
 
     if (request.method !== "POST") {
@@ -140,7 +141,6 @@ export class Chat {
       // Extract system messages from user input
       const userSystemMessages = messages.filter(msg => msg.role === "system");
       const userSystemPrompt = userSystemMessages.length > 0 ? userSystemMessages[0].content : "";
-
       const remoteSchemas = await this.getRemoteSchemas();
       const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, userSystemPrompt);
 
@@ -186,7 +186,6 @@ export class Chat {
         lastUsed: Date.now(),
       };
       await this.saveSession();
-
       // Handle streaming or standard response
       if (body.stream === true) {
         return this.handleStreamingResponse(agent, prompt);
@@ -281,7 +280,7 @@ export class Chat {
    * Handle streaming response
    */
   private handleStreamingResponse(agent: Agent, prompt: string): Response {
-    console.log(agent, "prompt");
+    // console.log(agent, "prompt");
     const streamId = "chatcmpl-" + Date.now().toString(36);
     const showToolEvents = this.request?.headers.get("withToolEvent") !== null;
     const responsePromise = agent.stream(prompt);

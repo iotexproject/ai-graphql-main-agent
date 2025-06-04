@@ -37,13 +37,15 @@ export class KVCache {
     options: { 
       ttl?: number,  // 缓存有效期（秒）
       logHits?: boolean, // 是否记录缓存命中日志
-      forceFresh?: boolean // 强制忽略缓存，获取新数据
+      forceFresh?: boolean, // 强制忽略缓存，获取新数据
+      returnStaleWhileRevalidate?: boolean // 缓存过期后是否先返回旧数据，默认true
     } = {}
   ): Promise<T> {
     // 设置默认选项
     const ttl = options.ttl || 3600; // 默认1小时
     const logHits = options.logHits !== false;
     const forceFresh = options.forceFresh || false;
+    const returnStaleWhileRevalidate = options.returnStaleWhileRevalidate !== false; // 默认为true
     
     // 如果没有提供KV或强制刷新，直接执行函数
     if (!globalKVNamespace || forceFresh) {
@@ -65,23 +67,29 @@ export class KVCache {
         return cached.data;
       }
       
+      // 缓存过期或不存在的情况
+      if (cached && returnStaleWhileRevalidate) {
+        // 如果有过期的缓存数据且启用了stale-while-revalidate策略
+        if (logHits) {
+          console.log(`KV cache stale hit for key: ${key}, returning stale data and revalidating in background`);
+        }
+        
+        // 异步在后台更新缓存，不等待结果
+        this.updateCacheInBackground(key, fn, ttl, logHits);
+        
+        // 立即返回过期的缓存数据
+        return cached.data;
+      }
+      
       if (logHits) {
         console.log(`KV cache miss for key: ${key}, fetching fresh data`);
       }
       
-      // 缓存不存在或已过期，执行函数获取新数据
+      // 缓存不存在或已过期且未启用stale-while-revalidate，执行函数获取新数据
       const data = await fn();
       
       // 存储新数据到KV缓存
-      const cacheData = {
-        timestamp: Date.now(),
-        data
-      };
-      
-      // 异步写入KV，不等待完成
-      globalKVNamespace.put(key, JSON.stringify(cacheData), {
-        expirationTtl: ttl
-      }).catch(err => console.error(`Error writing to KV cache: ${err}`));
+      await this.setCacheData(key, data, ttl);
       
       return data;
     } catch (error) {
@@ -89,6 +97,45 @@ export class KVCache {
       // 发生错误时，尝试直接执行函数
       return await fn();
     }
+  }
+
+  /**
+   * 在后台异步更新缓存
+   * @private
+   */
+  private static async updateCacheInBackground<T>(
+    key: string, 
+    fn: () => Promise<T>, 
+    ttl: number, 
+    logHits: boolean
+  ): Promise<void> {
+    try {
+      const data = await fn();
+      await this.setCacheData(key, data, ttl);
+      if (logHits) {
+        console.log(`Background cache update completed for key: ${key}`);
+      }
+    } catch (error) {
+      console.error(`Background cache update failed for key ${key}:`, error);
+    }
+  }
+
+  /**
+   * 设置缓存数据的通用方法
+   * @private
+   */
+  private static async setCacheData<T>(key: string, data: T, ttl: number): Promise<void> {
+    if (!globalKVNamespace) return;
+    
+    const cacheData = {
+      timestamp: Date.now(),
+      data
+    };
+    
+    // 异步写入KV，不等待完成
+    globalKVNamespace.put(key, JSON.stringify(cacheData), {
+      expirationTtl: ttl
+    }).catch(err => console.error(`Error writing to KV cache: ${err}`));
   }
   
   /**

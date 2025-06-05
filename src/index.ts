@@ -58,6 +58,7 @@ app.use("*", async (c, next) => {
   return next();
 });
 
+
 // app.use(logger());
 
 app.use("/preview/:projectId/v1/chat/completions", apiKeyMiddleware);  

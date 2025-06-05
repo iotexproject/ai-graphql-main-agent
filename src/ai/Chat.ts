@@ -108,19 +108,19 @@ export class Chat {
     try {
       const projectId = request.headers.get("X-Project-Id");
       const isGlobalChat = request.headers.get("X-Global-Chat") === "true";
-      
+
       if (projectId) {
         this.projectId = projectId;
         console.log("Using project ID from header:", this.projectId);
       }
 
       const body = (await request.json()) as ChatRequestBody;
-      
+
       // Handle global chat logic within Durable Object
       if (isGlobalChat) {
         return await this.handleGlobalChatInDO(body);
       }
-      
+
       // Regular project chat logic
       let messages: Message[] = [];
 
@@ -137,59 +137,70 @@ export class Chat {
           status: 400
         });
       }
+      const getAgent = async (controller?: ReadableStreamDefaultController) => {
+        const encoder = new TextEncoder();
+        const streamId = "chatcmpl-" + Date.now().toString(36);
+        // Extract system messages from user input
+        const userSystemMessages = messages.filter(msg => msg.role === "system");
+        const userSystemPrompt = userSystemMessages.length > 0 ? userSystemMessages[0].content : "";
+        if (controller) {
+          controller.enqueue(encoder.encode(formatStreamingData("Fetching remote schemas...", streamId)));
+        }
+        const remoteSchemas = await this.getRemoteSchemas();
+        const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, userSystemPrompt);
 
-      // Extract system messages from user input
-      const userSystemMessages = messages.filter(msg => msg.role === "system");
-      const userSystemPrompt = userSystemMessages.length > 0 ? userSystemMessages[0].content : "";
-      const remoteSchemas = await this.getRemoteSchemas();
-      const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, userSystemPrompt);
+        // Update session with enhanced system prompt
+        if (enhancedSystemPrompt &&
+          (!this.session?.systemPrompt || this.session.systemPrompt !== enhancedSystemPrompt)) {
+          this.session = {
+            ...this.session,
+            systemPrompt: enhancedSystemPrompt,
+            lastUsed: Date.now(),
+          };
+          await this.saveSession();
+        }
 
-      // Update session with enhanced system prompt
-      if (enhancedSystemPrompt &&
-        (!this.session?.systemPrompt || this.session.systemPrompt !== enhancedSystemPrompt)) {
+        // Rebuild messages array with enhanced system prompt
+        if (userSystemMessages.length > 0) {
+          const systemMessageIndex = messages.findIndex(msg => msg.role === "system");
+          if (systemMessageIndex !== -1) {
+            messages[systemMessageIndex].content = enhancedSystemPrompt;
+          }
+        } else {
+          messages = [
+            { role: "system", content: enhancedSystemPrompt },
+            ...messages,
+          ];
+        }
+
+        const agent = await this.getAgent(enhancedSystemPrompt);
+
+        // Prepare prompt from messages
+        const prompt = messages
+          .map(msg => {
+            const prefix = msg.role === "user" ? "User: " :
+              msg.role === "assistant" ? "Assistant: " :
+                msg.role === "system" ? "System: " : "";
+            return `${prefix}${msg.content}`;
+          })
+          .join("\n\n");
+
+        // Update last used timestamp
         this.session = {
           ...this.session,
-          systemPrompt: enhancedSystemPrompt,
           lastUsed: Date.now(),
         };
         await this.saveSession();
-      }
-
-      // Rebuild messages array with enhanced system prompt
-      if (userSystemMessages.length > 0) {
-        const systemMessageIndex = messages.findIndex(msg => msg.role === "system");
-        if (systemMessageIndex !== -1) {
-          messages[systemMessageIndex].content = enhancedSystemPrompt;
+        return {
+          agent,
+          prompt
         }
-      } else {
-        messages = [
-          { role: "system", content: enhancedSystemPrompt },
-          ...messages,
-        ];
       }
-
-      const agent = await this.getAgent(enhancedSystemPrompt);
-
-      // Prepare prompt from messages
-      const prompt = messages
-        .map(msg => {
-          const prefix = msg.role === "user" ? "User: " :
-            msg.role === "assistant" ? "Assistant: " :
-              msg.role === "system" ? "System: " : "";
-          return `${prefix}${msg.content}`;
-        })
-        .join("\n\n");
-
-      // Update last used timestamp
-      this.session = {
-        ...this.session,
-        lastUsed: Date.now(),
-      };
-      await this.saveSession();
       // Handle streaming or standard response
       if (body.stream === true) {
-        return this.handleStreamingResponse(agent, prompt);
+        return this.handleStreamingResponseV2(getAgent);
       } else {
+        const { agent, prompt } = await getAgent();
         return this.handleStandardResponse(agent, prompt);
       }
     } catch (error) {
@@ -267,6 +278,7 @@ export class Chat {
         name: "Chat Agent",
         instructions,
         model: openai.languageModel("qwen/qwen-2.5-72b-instruct"),
+        // model: openai.languageModel("openai/gpt-3.5-turbo-0125"),
         tools: { HttpTool, SchemaDetailsTool },
       });
       return this.agent;
@@ -336,6 +348,73 @@ export class Chat {
       },
     });
   }
+
+
+  /**
+ * Handle streaming response
+ */
+  private handleStreamingResponseV2(getAgent: (controller: ReadableStreamDefaultController) => Promise<any>): Response {
+    // console.log(agent, "prompt");
+    const streamId = "chatcmpl-" + Date.now().toString(36);
+    const showToolEvents = this.request?.headers.get("withToolEvent") !== null;
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+
+        try {
+          const result = await getAgent(controller);
+          const agent = result.agent;
+          const prompt = result.prompt;
+          if (!agent) {
+             return
+          }
+          const response = await agent.stream(prompt);
+          controller.enqueue(encoder.encode(formatStreamingData("Starting to answer the question...", streamId)));
+
+          for await (const part of response.fullStream) {
+            if (part.type === "text-delta") {
+              // console.log("Text delta received:", part.textDelta);
+              controller.enqueue(
+                encoder.encode(formatStreamingData(part.textDelta, streamId))
+              );
+            }
+            else if (["tool-call", "tool-call-streaming-start", "tool-result"].includes(part.type)) {
+              console.log("Tool event received:", part.type);
+              const formattedData = handleToolEvent(part.type, part, streamId, showToolEvents);
+              if (formattedData) {
+                controller.enqueue(encoder.encode(formattedData));
+              }
+            } else if (part.type === "error") {
+              console.log("Error:", part);
+            } else {
+              console.log("Unknown event:", part);
+            }
+          }
+
+          controller.enqueue(encoder.encode(formatStreamingData("", streamId, "stop")));
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        } catch (error) {
+          console.error("Error in stream processing:", error);
+          controller.enqueue(encoder.encode(formatStreamingData("\n\n[Error occurred]", streamId)));
+          controller.enqueue(encoder.encode(formatStreamingData("", streamId, "stop")));
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        } finally {
+          console.log("Stream closed");
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      },
+    });
+  }
+
 
   /**
    * Handle standard (non-streaming) response
@@ -473,7 +552,7 @@ This process is very important because without the correct schema information, y
     try {
       const requestMessages = body.messages || [];
       const isStream = body.stream === true;
-      
+
       if (!requestMessages.length) {
         return createErrorResponse(isStream, {
           message: "Messages are required",
@@ -482,21 +561,23 @@ This process is very important because without the correct schema information, y
           status: 400
         });
       }
-      
-      const userMessage = requestMessages[requestMessages.length - 1]?.content || "";
-      const publishedProjects = await DB.getPublishedProjects();
-      console.log(publishedProjects, "publishedProjects");
-      
-      if (publishedProjects.length === 0) {
-        // Use sora model logic here - we need to implement this in DO
-        return await this.useSoraModelInDO(body);
-      }
-      
-      const projectsInfo = publishedProjects.map(project =>
-        `- Project ID: ${project.id}\n  Name: ${project.name}\n  Description: ${project.description || 'No description'}`
-      ).join('\n\n');
+      const getAgent = async (controller?: ReadableStreamDefaultController) => {
+        const encoder = new TextEncoder();
+        const streamId = "chatcmpl-" + Date.now().toString(36);
+        const userMessage = requestMessages[requestMessages.length - 1]?.content || "";
+        controller?.enqueue(encoder.encode(formatStreamingData("Start to select the appropriate agent...", streamId)));
+        const publishedProjects = await DB.getPublishedProjects();
+        console.log(publishedProjects, "publishedProjects");
+  
+        if (publishedProjects.length === 0) {
+          // Use sora model logic here - we need to implement this in DO
+          return await this.useSoraModelInDO(body, controller);
+        }
+        const projectsInfo = publishedProjects.map(project =>
+          `- Project ID: ${project.id}\n  Name: ${project.name}\n  Description: ${project.description || 'No description'}`
+        ).join('\n\n');
 
-      const selectionPrompt = `You are a smart project selector. Based on the available projects and user's question, select the most suitable project to answer the question. If no project is suitable, return "NONE".
+        const selectionPrompt = `You are a smart project selector. Based on the available projects and user's question, select the most suitable project to answer the question. If no project is suitable, return "NONE".
 Available Projects:
 ${projectsInfo}
 
@@ -510,52 +591,62 @@ Analysis Rules:
 
 Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
 
-      console.log(selectionPrompt, "selectionPrompt");
-      const { generateText } = await import("ai");
-      const openrouter = getAI(this.env.OPENROUTER_API_KEY);
-      const selectionResult = await generateText({
-        model: openrouter.languageModel("qwen/qwen-2.5-72b-instruct"),
-        prompt: selectionPrompt,
-        temperature: 0.1,
-        maxTokens: 50,
-      });
-      
-      const selectedProjectId = selectionResult.text.trim();
-      console.log(selectedProjectId, "selectionResult");
-      
-      if (selectedProjectId === "NONE" || !publishedProjects.find(p => p.id === selectedProjectId)) {
-        console.log("No suitable project found, using sora model");
-        return await this.useSoraModelInDO(body);
+        console.log(selectionPrompt, "selectionPrompt");
+        const { generateText } = await import("ai");
+        const openrouter = getAI(this.env.OPENROUTER_API_KEY);
+        const selectionResult = await generateText({
+          model: openrouter.languageModel("qwen/qwen-2.5-72b-instruct"),
+          prompt: selectionPrompt,
+          temperature: 0.1,
+          maxTokens: 50,
+        });
+
+        const selectedProjectId = selectionResult.text.trim();
+        console.log(selectedProjectId, "selectionResult");
+
+        if (selectedProjectId === "NONE" || !publishedProjects.find(p => p.id === selectedProjectId)) {
+          console.log("No suitable project found, using sora model");
+          return await this.useSoraModelInDO(body, controller);
+        }
+
+        console.log(`Selected project: ${selectedProjectId}`);
+
+        // Switch to the selected project's context
+        this.projectId = selectedProjectId;
+
+        // Process the request as a regular project chat
+        const processMessages: Message[] = body.messages || [];
+        if (body.message && !body.messages) {
+          processMessages.push({ role: "user", content: body.message });
+        }
+
+        const remoteSchemas = await this.getRemoteSchemas();
+        const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, "");
+
+        const agent = await this.getAgent(enhancedSystemPrompt);
+        const prompt = processMessages
+          .map(msg => {
+            const prefix = msg.role === "user" ? "User: " :
+              msg.role === "assistant" ? "Assistant: " :
+                msg.role === "system" ? "System: " : "";
+            return `${prefix}${msg.content}`;
+          })
+          .join("\n\n");
+
+        return {
+          agent,
+          prompt
+        }
       }
-
-      console.log(`Selected project: ${selectedProjectId}`);
-      
-      // Switch to the selected project's context
-      this.projectId = selectedProjectId;
-      
-      // Process the request as a regular project chat
-      const processMessages: Message[] = body.messages || [];
-      if (body.message && !body.messages) {
-        processMessages.push({ role: "user", content: body.message });
-      }
-
-      const remoteSchemas = await this.getRemoteSchemas();
-      const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, "");
-
-      const agent = await this.getAgent(enhancedSystemPrompt);
-      const prompt = processMessages
-        .map(msg => {
-          const prefix = msg.role === "user" ? "User: " :
-                        msg.role === "assistant" ? "Assistant: " :
-                        msg.role === "system" ? "System: " : "";
-          return `${prefix}${msg.content}`;
-        })
-        .join("\n\n");
 
       if (body.stream === true) {
-        return this.handleStreamingResponse(agent, prompt);
+        return this.handleStreamingResponseV2(getAgent);
       } else {
-        return this.handleStandardResponse(agent, prompt);
+        const result: any = await getAgent();
+        if(!result.agent){
+          return result
+        }
+        return this.handleStandardResponse(result.agent, result.prompt);
       }
     } catch (error) {
       console.error("Error in global chat within DO:", error);
@@ -571,20 +662,20 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
   /**
    * Use Sora model within Durable Object
    */
-  private async useSoraModelInDO(body: ChatRequestBody): Promise<Response> {
+  private async useSoraModelInDO(body: ChatRequestBody, controller?: ReadableStreamDefaultController): Promise<Response> {
     try {
       const messages = body.messages || [];
       const prompt = messages
         .map(msg => {
           const prefix = msg.role === "user" ? "User: " :
-                        msg.role === "assistant" ? "Assistant: " :
-                        msg.role === "system" ? "System: " : "";
+            msg.role === "assistant" ? "Assistant: " :
+              msg.role === "system" ? "System: " : "";
           return `${prefix}${msg.content}`;
         })
         .join("\n\n");
 
       const openrouter = getAI(this.env.OPENROUTER_API_KEY);
-      
+
       if (body.stream === true) {
         const { streamText } = await import("ai");
         const result = await streamText({
@@ -593,32 +684,20 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
         });
 
         const streamId = "chatcmpl-" + Date.now().toString(36);
-        const stream = new ReadableStream({
-          async start(controller) {
-            const encoder = new TextEncoder();
-            controller.enqueue(encoder.encode(formatStreamingData("", streamId)));
-            
-            try {
-              for await (const delta of result.textStream) {
-                controller.enqueue(encoder.encode(formatStreamingData(delta, streamId)));
-              }
-              controller.enqueue(encoder.encode(formatStreamingData("", streamId, "stop")));
-              controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-            } catch (error) {
-              console.error("Error in sora stream:", error);
-            } finally {
-              controller.close();
-            }
-          },
-        });
+        const encoder = new TextEncoder();
+        controller!.enqueue(encoder.encode(formatStreamingData("", streamId)));
 
-        return new Response(stream, {
-          headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache, no-transform",
-            Connection: "keep-alive",
-          },
-        });
+        try {
+          for await (const delta of result.textStream) {
+            controller!.enqueue(encoder.encode(formatStreamingData(delta, streamId)));
+          }
+          controller!.enqueue(encoder.encode(formatStreamingData("", streamId, "stop")));
+          controller!.enqueue(encoder.encode("data: [DONE]\n\n"));
+        } catch (error) {
+          console.error("Error in sora stream:", error);
+        } finally {
+          controller!.close();
+        }
       } else {
         const { generateText } = await import("ai");
         const result = await generateText({

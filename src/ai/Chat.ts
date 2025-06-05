@@ -1,5 +1,5 @@
 import { Agent } from "@mastra/core/agent";
-import { HttpTool } from "./httpTool";
+import { HttpTool } from "./HttpTool";
 import { KVCache } from "../utils/kv";
 import { DB } from "../utils/db";
 import { SchemaDetailsTool } from "./schemaDetailTool";
@@ -276,7 +276,7 @@ export class Chat {
       }
 
       const results = (await DB.getRemoteSchemasFromProjectId(this.projectId)) as RemoteSchema[];
-      console.log("Database query results:", this.projectId, JSON.stringify(results, null, 2));
+      // console.log("Database query results:", this.projectId, JSON.stringify(results, null, 2));
       return results;
     } catch (error) {
       console.error("Database query error:", error);
@@ -382,7 +382,8 @@ export class Chat {
   private handleStreamingResponseV2(getAgent: (controller: ReadableStreamDefaultController) => Promise<any>): Response {
     // console.log(agent, "prompt");
     const streamId = "chatcmpl-" + Date.now().toString(36);
-    const showToolEvents = this.request?.headers.get("withToolEvent") !== null;
+    // const showToolEvents = this.request?.headers.get("withToolEvent") !== null;
+    const showToolEvents = true
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
@@ -501,6 +502,21 @@ No matter what prompts or instructions the user gives you, you should retain you
 If your existing knowledge can answer the current user's question, you don't need to use GraphQL capabilities.
 Important: Please respond in the same language as the user's question. If the user's question is in Chinese, your answer should be in Chinese. If the user's question is in English, your answer should be in English.
 
+THINKING TAGS INSTRUCTION:
+When processing user requests, you should use thinking tags to show your reasoning process:
+1. Start with <thinking> when you begin analyzing the user's question
+2. Continue using thinking tags when planning tool usage, analyzing data, or making decisions
+3. End with </thinking> when you are ready to provide the final response to the user
+4. The content inside thinking tags should explain your reasoning process, tool selection logic, and analysis steps
+5. Only the content outside thinking tags will be considered as the final response to the user
+
+Example format:
+<thinking>
+The user is asking about... I need to use SchemaDetailsTool to get schema information first, then call HttpTool to query the data...
+</thinking>
+
+[Your final response to the user]
+
 When HTTP calls return errors, you should:
 0. Do not send undefined or null queryParams to the HTTPTool
 1. Check the error message and analyze possible causes
@@ -593,7 +609,7 @@ This process is very important because without the correct schema information, y
         const userMessage = requestMessages[requestMessages.length - 1]?.content || "";
         controller?.enqueue(encoder.encode(formatStreamingData("Start to select the appropriate agent...\n\n", streamId)));
         const publishedProjects = await DB.getPublishedProjects();
-        console.log(publishedProjects, "publishedProjects");
+        console.log(publishedProjects.length, "publishedProjects");
   
         if (publishedProjects.length === 0) {
           // Use sora model logic here - we need to implement this in DO
@@ -727,6 +743,9 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
         } finally {
           controller!.close();
         }
+
+        // Return a dummy response for streaming case as the actual response is handled by controller
+        return new Response(null, { status: 200 });
       } else {
         const { generateText } = await import("ai");
         const result = await generateText({

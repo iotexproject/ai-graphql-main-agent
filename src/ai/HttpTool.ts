@@ -50,7 +50,7 @@ export const handleHTTPRequest = async ({ url, method, headers = {}, body, param
   try {
     // Extract parameters
     console.log({ url, method, headers, params });
-    console.log((body), 'HTTP BODY');
+    // console.log((body), 'HTTP BODY');
     if (body?.headers) {
       headers = body.headers;
     }
@@ -78,7 +78,7 @@ export const handleHTTPRequest = async ({ url, method, headers = {}, body, param
           retries: 3
         });
 
-        console.log(JSON.stringify(response.data), 'HTTP RES');
+        // console.log(JSON.stringify(response.data), 'HTTP RES');
         return {
           data: response.data,
           error: false

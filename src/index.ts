@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { Chat } from "./ai/chat";
+import { Chat } from "./ai/Chat";
 import { KVCache } from "./utils/kv";
 import { DB } from "./utils/db";
 import type { UserSession } from "./storage/UserSession";

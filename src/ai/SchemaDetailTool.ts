@@ -16,7 +16,7 @@ export const SchemaDetailsTool = createTool({
     path: ["remoteSchemaId"]
   }),
   execute: async ({ context }) => {
-    console.log('SchemaDetailsTool execute', context);
+    // console.log('SchemaDetailsTool execute', context);
     try {
       const { remoteSchemaId, marketplaceId, queryFields = [], mutationFields = [] } = context;
       

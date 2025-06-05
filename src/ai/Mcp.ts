@@ -7,7 +7,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { handleSchemaDetails, handleListSchemas } from "../utils/tool-handlers";
-import { handleHTTPRequest } from "./httpTool";
+import { handleHTTPRequest } from "./HttpTool";
 
 type Bindings = Env;
 type Props = {

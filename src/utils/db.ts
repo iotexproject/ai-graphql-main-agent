@@ -194,7 +194,7 @@ export class DB {
       // return await KVCache.wrap('getPublishedProjects-v4', async () => {
       // 执行查询获取所有已发布的项目
       const result = await this.query(
-        'SELECT id, name, description, "isPublished" FROM projects WHERE "isPublished" = true',
+        'SELECT id, name, description, "isPublished", prompt FROM projects WHERE "isPublished" = true',
         []
       );
 

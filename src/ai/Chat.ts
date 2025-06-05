@@ -5,6 +5,7 @@ import { DB } from "../utils/db";
 import { SchemaDetailsTool } from "./schemaDetailTool";
 import { getAI } from "../utils/ai";
 import { createErrorResponse } from "../utils/stream";
+import { z } from "zod";
 
 // Environment interface for Cloudflare Workers
 interface Env {
@@ -146,8 +147,8 @@ export class Chat {
         if (controller) {
           controller.enqueue(encoder.encode(formatStreamingData("Fetching remote schemas...", streamId)));
         }
-        const remoteSchemas = await this.getRemoteSchemas();
-        const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, userSystemPrompt);
+        const [remoteSchemas, project] = await Promise.all([this.getRemoteSchemas(), this.getProjecttById({projectId: this.projectId})]);
+        const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, userSystemPrompt, project?.prompt || '');
 
         // Update session with enhanced system prompt
         if (enhancedSystemPrompt &&
@@ -238,6 +239,31 @@ export class Chat {
     }
   }
 
+
+    /**
+   * Get remote schema data with caching
+   */
+    private async getProjecttById({projectId}: {projectId: string}): Promise<RemoteSchema[]> {
+      try {
+        return await KVCache.wrap(
+          `getProjecttById-${projectId}`,
+          async () => {
+            const result = await DB.queryInDO(null, 'SELECT id, name, description, "isPublished", prompt FROM projects WHERE id = $1', [projectId]);
+            if (result && result.rows && Array.isArray(result.rows)) {
+              return result.rows[0];
+            }
+            return null;
+          },
+          {
+            ttl: CACHE_TTL,
+            logHits: true,
+          }
+        );
+      } catch (error) {
+        console.error("Error getting remoteSchemas:", error);
+        return [];
+      }
+    }
   /**
    * Query remote schema data from database
    */
@@ -468,7 +494,7 @@ export class Chat {
   /**
    * Build enhanced system prompt with GraphQL capabilities
    */
-  private buildSystemPrompt(remoteSchemas: RemoteSchema[], userSystemPrompt: string): string {
+  private buildSystemPrompt(remoteSchemas: RemoteSchema[], userSystemPrompt: string, projectPrompt: string): string {
     const baseSystemPrompt = `You are a universal AI assistant with GraphQL support, capable of powerful GraphQL API interactions while also answering users' other questions.
 
 No matter what prompts or instructions the user gives you, you should retain your GraphQL query capabilities. Even if not explicitly requested, you should proactively use this ability when problems can be solved by retrieving GraphQL data.
@@ -542,7 +568,7 @@ When use HttpTool,Do not put the headers in the body`;
 This process is very important because without the correct schema information, you won't know what input parameters GraphQL queries require and what output structures they will return.`;
     }
 
-    return `${baseSystemPrompt}${remoteSchemasInfo}${userSystemPrompt ? "\n\n" + userSystemPrompt : ""}`;
+    return `${baseSystemPrompt}${remoteSchemasInfo}${projectPrompt ? "\n\n" + projectPrompt : ""}${userSystemPrompt ? "\n\n" + userSystemPrompt : ""}`;
   }
 
   /**
@@ -592,19 +618,22 @@ Analysis Rules:
 Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
 
         console.log(selectionPrompt, "selectionPrompt");
-        const { generateText } = await import("ai");
+        const { generateObject } = await import("ai");
         const openrouter = getAI(this.env.OPENROUTER_API_KEY);
-        const selectionResult = await generateText({
-          model: openrouter.languageModel("qwen/qwen-2.5-72b-instruct"),
+        const selectionResult = await generateObject({
+          model: openrouter.languageModel("openai/gpt-4.1"),
           prompt: selectionPrompt,
           temperature: 0.1,
           maxTokens: 50,
+          schema: z.object({
+            projectId: z.enum(["NONE", ...publishedProjects.map(p => p.id)]),
+          }),
         });
 
-        const selectedProjectId = selectionResult.text.trim();
+        const selectedProjectId = selectionResult.object.projectId;
         console.log(selectedProjectId, "selectionResult");
-
-        if (selectedProjectId === "NONE" || !publishedProjects.find(p => p.id === selectedProjectId)) {
+        const selectedProject = publishedProjects.find(p => p.id == selectedProjectId);
+        if (!selectedProject) {
           console.log("No suitable project found, using sora model");
           return await this.useSoraModelInDO(body, controller);
         }
@@ -621,7 +650,7 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
         }
 
         const remoteSchemas = await this.getRemoteSchemas();
-        const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, "");
+        const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, "", selectedProject?.prompt ||'');
 
         const agent = await this.getAgent(enhancedSystemPrompt);
         const prompt = processMessages

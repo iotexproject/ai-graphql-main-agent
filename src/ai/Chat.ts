@@ -145,9 +145,9 @@ export class Chat {
         const userSystemMessages = messages.filter(msg => msg.role === "system");
         const userSystemPrompt = userSystemMessages.length > 0 ? userSystemMessages[0].content : "";
         if (controller) {
-          controller.enqueue(encoder.encode(formatStreamingData("Fetching remote schemas...", streamId)));
+          controller.enqueue(encoder.encode(formatStreamingData("Fetching remote schemas...\n\n", streamId)));
         }
-        const [remoteSchemas, project] = await Promise.all([this.getRemoteSchemas(), this.getProjecttById({projectId: this.projectId})]);
+        const [remoteSchemas, project] = await Promise.all([this.getRemoteSchemas(), this.getProjectById({projectId: this.projectId!})]);
         const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, userSystemPrompt, project?.prompt || '');
 
         // Update session with enhanced system prompt
@@ -243,10 +243,10 @@ export class Chat {
     /**
    * Get remote schema data with caching
    */
-    private async getProjecttById({projectId}: {projectId: string}): Promise<RemoteSchema[]> {
+    private async getProjectById({projectId}: {projectId: string}): Promise<any> {
       try {
         return await KVCache.wrap(
-          `getProjecttById-${projectId}`,
+          `getProjectById-${projectId}`,
           async () => {
             const result = await DB.queryInDO(null, 'SELECT id, name, description, "isPublished", prompt FROM projects WHERE id = $1', [projectId]);
             if (result && result.rows && Array.isArray(result.rows)) {
@@ -395,7 +395,7 @@ export class Chat {
              return
           }
           const response = await agent.stream(prompt);
-          controller.enqueue(encoder.encode(formatStreamingData("Starting to answer the question...", streamId)));
+          controller.enqueue(encoder.encode(formatStreamingData("Starting to answer the question...\n\n", streamId)));
 
           for await (const part of response.fullStream) {
             if (part.type === "text-delta") {
@@ -591,7 +591,7 @@ This process is very important because without the correct schema information, y
         const encoder = new TextEncoder();
         const streamId = "chatcmpl-" + Date.now().toString(36);
         const userMessage = requestMessages[requestMessages.length - 1]?.content || "";
-        controller?.enqueue(encoder.encode(formatStreamingData("Start to select the appropriate agent...", streamId)));
+        controller?.enqueue(encoder.encode(formatStreamingData("Start to select the appropriate agent...\n\n", streamId)));
         const publishedProjects = await DB.getPublishedProjects();
         console.log(publishedProjects, "publishedProjects");
   

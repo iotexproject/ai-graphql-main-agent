@@ -637,7 +637,7 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
         const { generateObject } = await import("ai");
         const openrouter = getAI(this.env.OPENROUTER_API_KEY);
         const selectionResult = await generateObject({
-          model: openrouter.languageModel("openai/gpt-4.1"),
+          model: openrouter.languageModel("qwen/qwen-2.5-72b-instruct"),
           prompt: selectionPrompt,
           temperature: 0.1,
           maxTokens: 50,

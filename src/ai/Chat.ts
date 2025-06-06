@@ -634,19 +634,16 @@ Analysis Rules:
 Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
 
         console.log(selectionPrompt, "selectionPrompt");
-        const { generateObject } = await import("ai");
+        const { generateText } = await import("ai");
         const openrouter = getAI(this.env.OPENROUTER_API_KEY);
-        const selectionResult = await generateObject({
+        const selectionResult = await generateText({
           model: openrouter.languageModel("qwen/qwen-2.5-72b-instruct"),
           prompt: selectionPrompt,
           temperature: 0.1,
           maxTokens: 50,
-          schema: z.object({
-            projectId: z.enum(["NONE", ...publishedProjects.map(p => p.id)]),
-          }),
         });
 
-        const selectedProjectId = selectionResult.object.projectId;
+        const selectedProjectId = selectionResult.text.trim();
         console.log(selectedProjectId, "selectionResult");
         const selectedProject = publishedProjects.find(p => p.id == selectedProjectId);
         if (!selectedProject) {

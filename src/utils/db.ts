@@ -193,10 +193,13 @@ export class DB {
     try {
       // return await KVCache.wrap('getPublishedProjects-v4', async () => {
       // 执行查询获取所有已发布的项目
-      const result = await this.query(
-        'SELECT id, name, description, "isPublished", prompt FROM projects WHERE "isPublished" = true',
-        []
-      );
+      const result = await  KVCache.wrap('getPublishedProjects', 
+        async () => {
+          return this.query(
+            'SELECT id, name, description, "isPublished", "isOffical", prompt FROM projects WHERE "isPublished" = true',
+            []
+          )
+        })
 
       // 检查查询结果
       if (result && result.rows && Array.isArray(result.rows)) {

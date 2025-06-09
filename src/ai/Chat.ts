@@ -145,9 +145,9 @@ export class Chat {
         const userSystemMessages = messages.filter(msg => msg.role === "system");
         const userSystemPrompt = userSystemMessages.length > 0 ? userSystemMessages[0].content : "";
         if (controller) {
-          controller.enqueue(encoder.encode(formatStreamingData("Fetching remote schemas...\n\n", streamId)));
+          controller.enqueue(encoder.encode(formatStreamingData("<thinking>Fetching remote schemas...</thinking>\n", streamId)));
         }
-        const [remoteSchemas, project] = await Promise.all([this.getRemoteSchemas(), this.getProjectById({projectId: this.projectId!})]);
+        const [remoteSchemas, project] = await Promise.all([this.getRemoteSchemas(), this.getProjectById({ projectId: this.projectId! })]);
         const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, userSystemPrompt, project?.prompt || '');
 
         // Update session with enhanced system prompt
@@ -240,30 +240,30 @@ export class Chat {
   }
 
 
-    /**
-   * Get remote schema data with caching
-   */
-    private async getProjectById({projectId}: {projectId: string}): Promise<any> {
-      try {
-        return await KVCache.wrap(
-          `getProjectById-${projectId}`,
-          async () => {
-            const result = await DB.queryInDO(null, 'SELECT id, name, description, "isPublished", prompt FROM projects WHERE id = $1', [projectId]);
-            if (result && result.rows && Array.isArray(result.rows)) {
-              return result.rows[0];
-            }
-            return null;
-          },
-          {
-            ttl: CACHE_TTL,
-            logHits: true,
+  /**
+ * Get remote schema data with caching
+ */
+  private async getProjectById({ projectId }: { projectId: string }): Promise<any> {
+    try {
+      return await KVCache.wrap(
+        `getProjectById-${projectId}`,
+        async () => {
+          const result = await DB.queryInDO(null, 'SELECT id, name, description, "isPublished", prompt FROM projects WHERE id = $1', [projectId]);
+          if (result && result.rows && Array.isArray(result.rows)) {
+            return result.rows[0];
           }
-        );
-      } catch (error) {
-        console.error("Error getting remoteSchemas:", error);
-        return [];
-      }
+          return null;
+        },
+        {
+          ttl: CACHE_TTL,
+          logHits: true,
+        }
+      );
+    } catch (error) {
+      console.error("Error getting remoteSchemas:", error);
+      return [];
     }
+  }
   /**
    * Query remote schema data from database
    */
@@ -393,10 +393,10 @@ export class Chat {
           const agent = result.agent;
           const prompt = result.prompt;
           if (!agent) {
-             return
+            return
           }
           const response = await agent.stream(prompt);
-          controller.enqueue(encoder.encode(formatStreamingData("Starting to answer the question...\n\n", streamId)));
+          controller.enqueue(encoder.encode(formatStreamingData("<thinking>Starting to answer the question...</thinking>\n", streamId)));
 
           for await (const part of response.fullStream) {
             if (part.type === "text-delta") {
@@ -607,10 +607,10 @@ This process is very important because without the correct schema information, y
         const encoder = new TextEncoder();
         const streamId = "chatcmpl-" + Date.now().toString(36);
         const userMessage = requestMessages[requestMessages.length - 1]?.content || "";
-        controller?.enqueue(encoder.encode(formatStreamingData("Start to select the appropriate agent...\n\n", streamId)));
+        controller?.enqueue(encoder.encode(formatStreamingData("<thinking>Start to select the appropriate agent...</thinking>\n", streamId)));
         const publishedProjects = await DB.getPublishedProjects();
         console.log(publishedProjects.length, "publishedProjects");
-  
+
         if (publishedProjects.length === 0) {
           // Use sora model logic here - we need to implement this in DO
           return await this.useSoraModelInDO(body, controller);
@@ -620,8 +620,8 @@ This process is very important because without the correct schema information, y
 ID: ${project.id}
 Name: ${project.name}
 Description: ${project.description || 'No description available'}
----`
-        ).join('\n\n');
+Is Offical: ${project.isOffical ? 'Yes' : 'No'}
+---`).join('\n\n');
 
         const selectionPrompt = `You are a smart project selector. Based on the available projects and user's question, select the most suitable project to answer the question. If no project is suitable, return "NONE".
 
@@ -633,8 +633,9 @@ User Question: ${userMessage}
 Analysis Rules:
 1. Match the user's question topic with project descriptions
 2. Consider project names for relevance hints
-3. Only select a project if it's clearly relevant to the question
-4. If the question is too general or doesn't match any specific project capability, return "NONE"
+3. Must prioritize official projects
+4. Only select a project if it's clearly relevant to the question
+5. If the question is too general or doesn't match any specific project capability, return "NONE"
 
 Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
 
@@ -668,7 +669,7 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
         }
 
         const remoteSchemas = await this.getRemoteSchemas();
-        const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, "", selectedProject?.prompt ||'');
+        const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, "", selectedProject?.prompt || '');
 
         const agent = await this.getAgent(enhancedSystemPrompt);
         const prompt = processMessages
@@ -690,7 +691,7 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
         return this.handleStreamingResponseV2(getAgent);
       } else {
         const result: any = await getAgent();
-        if(!result.agent){
+        if (!result.agent) {
           return result
         }
         return this.handleStandardResponse(result.agent, result.prompt);

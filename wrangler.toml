@@ -1,8 +1,68 @@
-name = "graphql-main-agent"
+# name = "graphql-main-agent"
+# main = "src/index.ts"
+# compatibility_date = "2025-02-04"
+# compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
+
+# # 定义绑定到Durable Objects
+# [[durable_objects.bindings]]
+# name = "Chat"
+# class_name = "Chat"
+
+
+# [[durable_objects.bindings]]
+# name = "APIUSAGE"
+# class_name = "ApiUsage"
+
+# [[durable_objects.bindings]]
+# name = "USERSESSION"
+# class_name = "UserSession"
+
+# [[durable_objects.bindings]]
+# name = "MCP_OBJECT"
+# class_name = "MyMCP"
+
+# # Durable Objects迁移
+# [[migrations]]
+# tag = "v2"
+# new_sqlite_classes = ["MyMCP"]
+
+# [[migrations]]
+# tag = "v3"
+# new_sqlite_classes = ["ApiUsage", "UserSession"]
+
+# # KV绑定 - 用于缓存marketplace数据
+# [[kv_namespaces]]
+# binding = "CHAT_CACHE"
+# # id = "48a9d87921df46eb9a5d9bf71302b83d" # 在实际部署时需要替换为真实的KV ID
+# # preview_id = "e073d6bb683145ca971c0dc3790c787b" # 在实际部署时需要替换为真实的KV预览ID
+# # production
+# id = "7f102c0a20d642aaa6c00bfadd000d87" # 在实际部署时需要替换为真实的KV ID
+# preview_id = "e073d6bb683145ca971c0dc3790c787b" # 在实际部署时需要替换为真实的KV预览ID
+
+# # 环境变量（本地开发时使用）
+# # 实际的密钥请通过Cloudflare Dashboard或wrangler secret命令设置
+# # [vars]
+# # MODEL_NAME = "gpt-4o-2024-11-20"
+
+# # 示例：如何为不同环境配置变量
+# [env.production]
+# # production特定配置
+# # vars = { MODEL_NAME = "gpt-4o-2024-11-20" } 
+
+# [observability]
+# enabled = true
+# head_sampling_rate = 1 # optional. default = 1.
+
+
+
+
+
+# production
+name = "api-quicksilver"
 main = "src/index.ts"
 compatibility_date = "2025-02-04"
 compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
-
+account_id = "404b05ab0585350c0c0f5227a1ec402b"
 
 # 定义绑定到Durable Objects
 [[durable_objects.bindings]]
@@ -34,7 +94,10 @@ new_sqlite_classes = ["ApiUsage", "UserSession"]
 # KV绑定 - 用于缓存marketplace数据
 [[kv_namespaces]]
 binding = "CHAT_CACHE"
-id = "48a9d87921df46eb9a5d9bf71302b83d" # 在实际部署时需要替换为真实的KV ID
+# id = "48a9d87921df46eb9a5d9bf71302b83d" # 在实际部署时需要替换为真实的KV ID
+# preview_id = "e073d6bb683145ca971c0dc3790c787b" # 在实际部署时需要替换为真实的KV预览ID
+# production
+id = "7f102c0a20d642aaa6c00bfadd000d87" # 在实际部署时需要替换为真实的KV ID
 preview_id = "e073d6bb683145ca971c0dc3790c787b" # 在实际部署时需要替换为真实的KV预览ID
 
 # 环境变量（本地开发时使用）
@@ -50,4 +113,3 @@ preview_id = "e073d6bb683145ca971c0dc3790c787b" # 在实际部署时需要替换
 [observability]
 enabled = true
 head_sampling_rate = 1 # optional. default = 1.
-

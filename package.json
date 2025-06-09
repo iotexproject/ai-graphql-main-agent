@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "deploy:prod": "wrangler deploy --account=404b05ab0585350c0c0f5227a1ec402b",
     "types": "wrangler types",
     "format": "prettier --write '**/*.{js,ts}'",
     "check": "prettier . --check && biome lint && tsc",

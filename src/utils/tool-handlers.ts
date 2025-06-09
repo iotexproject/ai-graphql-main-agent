@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { KVCache } from "./kv";
 import { DB } from "./db";
 
@@ -37,6 +36,84 @@ export function isNonNullType(type: any): boolean {
 }
 
 /**
+ * 获取类型的详细信息，包括字段结构
+ */
+export function getTypeDetails(type: any, allTypes: any[]): any {
+  if (type.kind === 'NON_NULL') {
+    const innerType = getTypeDetails(type.ofType, allTypes);
+    return {
+      ...innerType,
+      isRequired: true
+    };
+  }
+  if (type.kind === 'LIST') {
+    const innerType = getTypeDetails(type.ofType, allTypes);
+    return {
+      kind: 'LIST',
+      name: `[${innerType.name}]`,
+      ofType: innerType
+    };
+  }
+  
+  // 查找类型定义
+  const typeDefinition = allTypes.find((t: any) => t.name === type.name);
+  
+  if (!typeDefinition) {
+    return {
+      kind: type.kind || 'SCALAR',
+      name: type.name
+    };
+  }
+  
+  // 如果是对象类型，返回字段信息
+  if (typeDefinition.kind === 'OBJECT' && typeDefinition.fields) {
+    return {
+      kind: 'OBJECT',
+      name: type.name,
+      fields: typeDefinition.fields.map((field: any) => ({
+        name: field.name,
+        description: field.description || '',
+        type: getFullTypeName(field.type),
+        isRequired: isNonNullType(field.type)
+      }))
+    };
+  }
+  
+  // 如果是枚举类型
+  if (typeDefinition.kind === 'ENUM' && typeDefinition.enumValues) {
+    return {
+      kind: 'ENUM',
+      name: type.name,
+      enumValues: typeDefinition.enumValues.map((value: any) => ({
+        name: value.name,
+        description: value.description || ''
+      }))
+    };
+  }
+  
+  // 如果是输入类型
+  if (typeDefinition.kind === 'INPUT_OBJECT' && typeDefinition.inputFields) {
+    return {
+      kind: 'INPUT_OBJECT',
+      name: type.name,
+      inputFields: typeDefinition.inputFields.map((field: any) => ({
+        name: field.name,
+        description: field.description || '',
+        type: getFullTypeName(field.type),
+        isRequired: isNonNullType(field.type)
+      }))
+    };
+  }
+  
+  // 默认返回基本信息
+  return {
+    kind: typeDefinition.kind || 'SCALAR',
+    name: type.name,
+    description: typeDefinition.description || ''
+  };
+}
+
+/**
  * 通用的HTTP请求处理函数
  */
 export interface HttpRequestResult {
@@ -68,7 +145,7 @@ export async function getSchemasByProjectId(projectId: string, env?: any) {
         return await DB.getRemoteSchemasFromProjectId(projectId);
       },
       {
-        ttl: 60 * 60, // 1小时缓存
+        ttl: 5 * 60, // 5分钟缓存
         logHits: true
       }
     );
@@ -117,7 +194,7 @@ export async function handleSchemaDetails(params: {
     const sourceId = marketplaceId || remoteSchemaId;
     
     // 构建缓存键
-    const cacheKey = `schema_${sourceType}_${sourceId}_fields_${queryFields.join(',')}`;
+    const cacheKey = `schema_${sourceType}_${sourceId}_fields_${queryFields.join(',')}_v1`;
     
     // 从缓存或数据库获取schema数据
     const schemaData = await KVCache.wrap(
@@ -175,7 +252,8 @@ export async function handleSchemaDetails(params: {
               name: arg.name,
               description: arg.description || '',
               type: getFullTypeName(arg.type),
-              isRequired: isNonNullType(arg.type)
+              isRequired: isNonNullType(arg.type),
+              typeDetails: getTypeDetails(arg.type, schemaData.types)
             }))
           : [];
         
@@ -183,6 +261,7 @@ export async function handleSchemaDetails(params: {
           name: field.name,
           description: field.description || '',
           returnType: getFullTypeName(field.type),
+          returnTypeDetails: getTypeDetails(field.type, schemaData.types),
           args
         };
       });
@@ -202,7 +281,8 @@ export async function handleSchemaDetails(params: {
                   name: arg.name,
                   description: arg.description || '',
                   type: getFullTypeName(arg.type),
-                  isRequired: isNonNullType(arg.type)
+                  isRequired: isNonNullType(arg.type),
+                  typeDetails: getTypeDetails(arg.type, schemaData.types)
                 }))
               : [];
             
@@ -210,6 +290,7 @@ export async function handleSchemaDetails(params: {
               name: field.name,
               description: field.description || '',
               returnType: getFullTypeName(field.type),
+              returnTypeDetails: getTypeDetails(field.type, schemaData.types),
               args,
               isMutation: true
             };

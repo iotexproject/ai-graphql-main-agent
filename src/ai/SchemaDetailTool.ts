@@ -36,7 +36,7 @@ export const SchemaDetailsTool = createTool({
           error: result.error
         };
       }
-      
+      console.log(JSON.stringify(result), 'result.fieldDetails');
       return {
         success: true,
         data: {

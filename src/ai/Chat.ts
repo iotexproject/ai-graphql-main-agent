@@ -615,11 +615,16 @@ This process is very important because without the correct schema information, y
           // Use sora model logic here - we need to implement this in DO
           return await this.useSoraModelInDO(body, controller);
         }
-        const projectsInfo = publishedProjects.map(project =>
-          `- Project ID: ${project.id}\n  Name: ${project.name}\n  Description: ${project.description || 'No description'}`
+        const projectsInfo = publishedProjects.map((project, index) =>
+          `[Project ${index + 1}]
+ID: ${project.id}
+Name: ${project.name}
+Description: ${project.description || 'No description available'}
+---`
         ).join('\n\n');
 
         const selectionPrompt = `You are a smart project selector. Based on the available projects and user's question, select the most suitable project to answer the question. If no project is suitable, return "NONE".
+
 Available Projects:
 ${projectsInfo}
 

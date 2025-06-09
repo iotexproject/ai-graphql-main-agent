@@ -124,10 +124,10 @@ export const HttpTool = createTool({
   id: "http-request",
   description: "Make HTTP requests to external APIs",
   inputSchema: z.object({
-    url: z.string().describe("The URL to make the request to"),
+    url: z.string().describe("The URL to make the request to,all graphql endpoint is https://graphql-main-worker.iotex-dev.workers.dev/graphql"),
     method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH"]).default("GET").describe("The HTTP method to use"),
     headers: z.record(z.string()).optional().describe("HTTP headers to include in the request"),
-    body: z.any().optional().describe("The request body,if json format,please use json format ,do not use string format like '{\"name\":\"John\", \"age\":30}'"),
+    body: z.any().optional().describe("The request body (for POST, PUT, etc.)"),
     params: z.record(z.string()).optional().describe("URL query parameters"),
   }),
   outputSchema: z.object({

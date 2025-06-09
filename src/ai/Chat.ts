@@ -14,8 +14,6 @@ interface Env {
   MODEL_NAME?: string;
   DATABASE_URL?: string;
   CHAT_CACHE?: KVNamespace;
-}
-
 // Message type definition (OpenAI compatible)
 export interface Message {
   role: "system" | "user" | "assistant" | "function" | "tool";
@@ -300,10 +298,10 @@ export class Chat {
     console.log('Checking cached Agent...');
     try {
       const openai = getAI(this.env.OPENROUTER_API_KEY);
-      this.agent = new Agent({
+           this.agent = new Agent({
         name: "Chat Agent",
         instructions,
-        model: openai.languageModel("qwen/qwen3-32b"),
+        model: openai.languageModel("qwen/qwen-2.5-72b-instruct"),
         // model: openai.languageModel("openai/gpt-3.5-turbo-0125"),
         tools: { HttpTool, SchemaDetailsTool },
       });
@@ -637,7 +635,7 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
         const { generateText } = await import("ai");
         const openrouter = getAI(this.env.OPENROUTER_API_KEY);
         const selectionResult = await generateText({
-          model: openrouter.languageModel("qwen/qwen3-32b"),
+          model: openrouter.languageModel("qwen/qwen-2.5-72b-instruct"),
           prompt: selectionPrompt,
           temperature: 0.1,
           maxTokens: 50,
@@ -721,7 +719,7 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
       if (body.stream === true) {
         const { streamText } = await import("ai");
         const result = await streamText({
-          model: openrouter.languageModel("qwen/qwen3-32b"),
+          model: openrouter.languageModel("qwen/qwen-2.5-72b-instruct"),
           prompt: prompt,
         });
 
@@ -746,70 +744,8 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
       } else {
         const { generateText } = await import("ai");
         const result = await generateText({
-          model: openrouter.languageModel("qwen/qwen3-32b"),
-          prompt: prompt,
-        });
-
-        return new Response(
-          JSON.stringify({
-            id: "chatcmpl-" + Date.now(),
-            object: "chat.completion",
-            created: Math.floor(Date.now() / 1000),
-            model: "openai/gpt-4o",
-            choices: [
-              {
-                index: 0,
-                message: {
-                  role: "assistant",
-                  content: result.text,
-                },
-                finish_reason: "stop",
-              },
-            ],
-          }),
-          {
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-      }
-    } catch (error) {
-      console.error("Error in sora model:", error);
-      return createErrorResponse(body.stream === true, {
-        message: "Failed to generate response with Sora model",
-        type: "server_error",
-        code: "processing_error",
-        status: 500
-      });
-    }
-  }
-}
-
-/**
- * Format SSE streaming data in OpenAI format
- */
-function formatStreamingData(
-  content: string,
-  id: string,
-  finishReason: string | null = null
-): string {
-  const data = {
-    id,
-    object: "chat.completion.chunk",
-    created: Math.floor(Date.now() / 1000),
-    model: "openai/gpt-4o",
-    choices: [
-      {
-        index: 0,
-        delta: content ? { content } : {},
-        finish_reason: finishReason,
-      },
-    ],
-  };
-  return `data: ${JSON.stringify(data)}\n\n`;
-}
-
-/**
- * Handle tool events for streaming response
+          model: openrouter.languageModel("qwen/qwen-2.5-72b-instruct"),
+ng response
  */
 function handleToolEvent(
   eventType: string,

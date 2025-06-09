@@ -135,6 +135,7 @@ export const HttpTool = createTool({
   }),
   execute: async ({ context }) => {
     try {
+      console.log(context, 'context');
       const result = await handleHTTPRequest(context);
 
       if (result.error === true) {

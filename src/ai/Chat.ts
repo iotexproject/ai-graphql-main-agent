@@ -631,10 +631,10 @@ ${projectsInfo}
 User Question: ${userMessage}
 
 Analysis Rules:
-1. Match the user's question topic with project descriptions
+1. Match the user's question topic with project name
 2. Consider project names for relevance hints
-3. Must prioritize official projects
-4. Only select a project if it's clearly relevant to the question
+3. Prioritize official projects if there are official projects available then select the unofficial project
+4. Select a project if it's clearly relevant to the question
 5. If the question is too general or doesn't match any specific project capability, return "NONE"
 
 Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;

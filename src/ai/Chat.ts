@@ -315,68 +315,6 @@ export class Chat {
   }
 
   /**
-   * Handle streaming response
-   */
-  private handleStreamingResponse(agent: Agent, prompt: string): Response {
-    // console.log(agent, "prompt");
-    const streamId = "chatcmpl-" + Date.now().toString(36);
-    const showToolEvents = this.request?.headers.get("withToolEvent") !== null;
-    const responsePromise = agent.stream(prompt);
-
-    const stream = new ReadableStream({
-      async start(controller) {
-        const encoder = new TextEncoder();
-
-        try {
-          const response = await responsePromise;
-          controller.enqueue(encoder.encode(formatStreamingData("", streamId)));
-
-          for await (const part of response.fullStream) {
-            if (part.type === "text-delta") {
-              // console.log("Text delta received:", part.textDelta);
-              controller.enqueue(
-                encoder.encode(formatStreamingData(part.textDelta, streamId))
-              );
-            }
-            else if (["tool-call", "tool-call-streaming-start", "tool-result"].includes(part.type)) {
-              console.log("Tool event received:", part.type);
-              const formattedData = handleToolEvent(part.type, part, streamId, showToolEvents);
-              if (formattedData) {
-                controller.enqueue(encoder.encode(formattedData));
-              }
-            } else if (part.type === "error") {
-              console.log("Error:", part);
-            } else {
-              console.log("Unknown event:", part);
-            }
-          }
-
-          controller.enqueue(encoder.encode(formatStreamingData("", streamId, "stop")));
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-        } catch (error) {
-          console.error("Error in stream processing:", error);
-          controller.enqueue(encoder.encode(formatStreamingData("\n\n[Error occurred]", streamId)));
-          controller.enqueue(encoder.encode(formatStreamingData("", streamId, "stop")));
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-        } finally {
-          console.log("Stream closed");
-          controller.close();
-        }
-      },
-    });
-
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
-      },
-    });
-  }
-
-
-  /**
  * Handle streaming response
  */
   private handleStreamingResponseV2(getAgent: (controller: ReadableStreamDefaultController) => Promise<any>): Response {

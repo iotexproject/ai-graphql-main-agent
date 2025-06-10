@@ -87,9 +87,9 @@ class_name = "MyMCP"
 tag = "v2"
 new_sqlite_classes = ["MyMCP"]
 
-[[migrations]]
-tag = "v3"
-new_sqlite_classes = ["ApiUsage", "UserSession"]
+# [[migrations]]
+# tag = "v3"
+# new_sqlite_classes = ["ApiUsage", "UserSession"]
 
 # KV绑定 - 用于缓存marketplace数据
 [[kv_namespaces]]

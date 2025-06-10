@@ -631,7 +631,7 @@ ${projectsInfo}
 User Question: ${userMessage}
 
 Analysis Rules:
-1. Match the user's question topic with project name
+1. Match the user's question topic with project description
 2. Consider project names for relevance hints
 3. Prioritize official projects if there are official projects available then select the unofficial project
 4. Select a project if it's clearly relevant to the question

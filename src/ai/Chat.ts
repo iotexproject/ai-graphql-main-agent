@@ -643,7 +643,7 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
         const { generateText } = await import("ai");
         const openrouter = getAI(this.env.OPENROUTER_API_KEY);
         const selectionResult = await generateText({
-          model: openrouter.languageModel("qwen/qwen-2.5-72b-instruct"),
+          model: openrouter.languageModel("perplexity/sonar-pro"),
           prompt: selectionPrompt,
           temperature: 0.1,
           maxTokens: 50,
@@ -727,7 +727,7 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
       if (body.stream === true) {
         const { streamText } = await import("ai");
         const result = await streamText({
-          model: openrouter.languageModel("qwen/qwen-2.5-72b-instruct"),
+          model: openrouter.languageModel("perplexity/sonar-pro"),
           prompt: prompt,
         });
 
@@ -752,7 +752,7 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
       } else {
         const { generateText } = await import("ai");
         const result = await generateText({
-          model: openrouter.languageModel("qwen/qwen-2.5-72b-instruct"),
+          model: openrouter.languageModel("perplexity/sonar-pro"),
           prompt: prompt,
         });
 

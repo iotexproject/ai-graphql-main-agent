@@ -335,7 +335,7 @@ export class Chat {
           }
           const response = await agent.stream(prompt);
           controller.enqueue(encoder.encode(formatStreamingData("<thinking>Starting to answer the question...</thinking>\n", streamId)));
-
+          let errorMessage = "";
           for await (const part of response.fullStream) {
             if (part.type === "text-delta") {
               // console.log("Text delta received:", part.textDelta);
@@ -351,16 +351,42 @@ export class Chat {
               }
             } else if (part.type === "error") {
               console.log("Error:", part);
+              // Handle AI_TypeValidationError and other validation errors
+              if (part.error?.name === "AI_TypeValidationError") {
+                errorMessage = "The AI model returned an invalid response format.";
+                console.error("AI_TypeValidationError details:", JSON.stringify(part.error, null, 2));
+              } else if (part.error?.cause?.name === "ZodError") {
+                errorMessage = "Response validation failed.";
+                console.error("ZodError details:", JSON.stringify(part.error.cause, null, 2));
+              } else if (part.error?.message) {
+                errorMessage = `Error: ${part.error.name}`;
+              }
             } else {
               console.log("Unknown event:", part);
             }
           }
-
+          if (errorMessage) {
+            controller.enqueue(encoder.encode(formatStreamingData(errorMessage, streamId)));
+          }
           controller.enqueue(encoder.encode(formatStreamingData("", streamId, "stop")));
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         } catch (error) {
           console.error("Error in stream processing:", error);
-          controller.enqueue(encoder.encode(formatStreamingData("\n\n[Error occurred]", streamId)));
+          
+          let errorMessage = "\n\n[Error occurred]";
+          
+          // Handle specific error types
+          if ((error as any)?.name === "AI_TypeValidationError") {
+            errorMessage = "\n\n[AI response format error: The model returned invalid data. Please try again.]";
+            console.error("AI_TypeValidationError in stream:", JSON.stringify(error, null, 2));
+          } else if ((error as any)?.cause?.name === "ZodError") {
+            errorMessage = "\n\n[Validation error: Response format validation failed. Please try again.]";
+            console.error("ZodError in stream:", JSON.stringify((error as any).cause, null, 2));
+          } else if ((error as any)?.message) {
+            errorMessage = `\n\n[Error: ${(error as any).message}]`;
+          }
+          
+          controller.enqueue(encoder.encode(formatStreamingData(errorMessage, streamId)));
           controller.enqueue(encoder.encode(formatStreamingData("", streamId, "stop")));
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         } finally {
@@ -421,10 +447,30 @@ export class Chat {
       );
     } catch (error) {
       console.error("Error generating standard response:", error);
+      
+      let errorMessage = "Failed to generate standard response";
+      let errorType = "server_error";
+      let errorCode = "processing_error";
+      
+      // Handle specific error types
+      if ((error as any)?.name === "AI_TypeValidationError") {
+        errorMessage = "AI model returned invalid response format. Please try again.";
+        errorType = "ai_validation_error";
+        errorCode = "invalid_model_response";
+        console.error("AI_TypeValidationError in standard response:", JSON.stringify(error, null, 2));
+      } else if ((error as any)?.cause?.name === "ZodError") {
+        errorMessage = "Response validation failed. Please try again with a different approach.";
+        errorType = "validation_error";
+        errorCode = "response_validation_failed";
+        console.error("ZodError in standard response:", JSON.stringify((error as any).cause, null, 2));
+      } else if ((error as any)?.message) {
+        errorMessage = (error as any).message;
+      }
+      
       return createErrorResponse(false, {
-        message: "Failed to generate standard response",
-        type: "server_error",
-        code: "processing_error",
+        message: errorMessage,
+        type: errorType,
+        code: errorCode,
         status: 500
       });
     }

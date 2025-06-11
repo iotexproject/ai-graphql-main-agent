@@ -128,7 +128,7 @@ export const HttpTool = createTool({
     method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH"]).default("GET").describe("The HTTP method to use"),
     headers: z.record(z.string()).optional().describe("HTTP headers to include in the request"),
     body: z.any().optional().describe("The request body (for POST, PUT, etc.)"),
-    params: z.record(z.string()).optional().describe("URL query parameters"),
+    params: z.record(z.any()).optional().describe("URL query parameters"),
   }),
   execute: async ({ context }) => {
     try {

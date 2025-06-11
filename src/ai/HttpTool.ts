@@ -126,8 +126,8 @@ export const HttpTool = createTool({
   inputSchema: z.object({
     url: z.string().describe("The URL to make the request to,all graphql endpoint is https://graphql-main-worker.iotex-dev.workers.dev/graphql"),
     method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH"]).default("GET").describe("The HTTP method to use"),
-    headers: z.record(z.string()).optional().describe("HTTP headers to include in the request"),
-    body: z.any().optional().describe("The request body (for POST, PUT, etc.)"),
+    headers: z.record(z.any()).optional().describe("HTTP headers to include in the request. For GraphQL: {'Content-Type': 'application/json', 'x-project-id': 'your-project-id'}"),
+    body: z.any().optional().describe("The request body. For GraphQL: {query: 'query{...}', variables: {...}, operationName: 'OptionalName'}"),
     params: z.record(z.any()).optional().describe("URL query parameters"),
   }),
   execute: async ({ context }) => {
@@ -145,7 +145,7 @@ export const HttpTool = createTool({
     } catch (error) {
       console.error('HTTP Tool Error:', error);
       return {
-        data: error.message || "HTTP Tool Error",
+        data: (error as Error)?.message || "HTTP Tool Error",
       };
     }
   },

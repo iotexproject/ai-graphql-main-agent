@@ -130,9 +130,6 @@ export const HttpTool = createTool({
     body: z.any().optional().describe("The request body (for POST, PUT, etc.)"),
     params: z.record(z.string()).optional().describe("URL query parameters"),
   }),
-  outputSchema: z.object({
-    data: z.any(),
-  }),
   execute: async ({ context }) => {
     try {
       console.log(context, 'context');
@@ -148,9 +145,7 @@ export const HttpTool = createTool({
     } catch (error) {
       console.error('HTTP Tool Error:', error);
       return {
-        data: null,
-        error: true,
-        message: 'HTTP Tool Error'
+        data: error.message || "HTTP Tool Error",
       };
     }
   },

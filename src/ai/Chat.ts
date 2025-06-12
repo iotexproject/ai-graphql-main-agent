@@ -350,7 +350,7 @@ export class Chat {
                 controller.enqueue(encoder.encode(formattedData));
               }
             } else if (part.type === "error") {
-              console.log("Error:", part);
+              console.error("Error:", part);
               // Handle AI_TypeValidationError and other validation errors
               if (part.error?.name === "AI_TypeValidationError") {
                 errorMessage = "The AI model returned an invalid response format.";
@@ -359,7 +359,8 @@ export class Chat {
                 errorMessage = "Response validation failed.";
                 console.error("ZodError details:", JSON.stringify(part.error.cause, null, 2));
               } else if (part.error?.message) {
-                errorMessage = `Error: ${part.error.name}`;
+                // errorMessage = `Error: ${part.error.name}`;
+                errorMessage = JSON.stringify(part.error, null, 2);
               }
             } else {
               console.log("Unknown event:", part);
@@ -540,7 +541,7 @@ Regarding schema information usage and caching:
             .join("\n");
 
           return `- ${remoteSchema.name} (ID: ${remoteSchema.id}, used as the remoteSchemaId parameter when calling SchemaDetailsTool), 
-        Graphql endpoint: https://graphql-main-worker.iotex-dev.workers.dev/graphql \n${fieldsText}`;
+        Graphql endpoint(If use HttpTool must use this endpoint): https://graphql-main-worker.iotex-dev.workers.dev/graphql \n${fieldsText}`;
         })
         .join("\n\n");
 

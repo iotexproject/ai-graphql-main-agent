@@ -140,7 +140,7 @@ export class DB {
       // 执行查询获取所有marketplace记录
       const result = await this.queryInDO(
         null,
-        'SELECT id, name, description, endpoint, headers, "schemaData", "createdAt" FROM "remoteSchemas" WHERE "projectId" = $1',
+        'SELECT id, name, description, endpoint, headers, "schemaData", "createdAt","openApiSpec" FROM "remoteSchemas" WHERE "projectId" = $1',
         [projectId]
       );
 
@@ -167,7 +167,7 @@ export class DB {
       // 执行查询获取指定ID的marketplace记录
       const result = await this.queryInDO(
         null,
-        'SELECT id, name, description, endpoint, headers, "schemaData", "createdAt" FROM "remoteSchemas" WHERE id = $1',
+        'SELECT id, name, description, endpoint, headers, "schemaData", "createdAt","openApiSpec" FROM "remoteSchemas" WHERE id = $1',
         [remoteSchemaId]
       );
 

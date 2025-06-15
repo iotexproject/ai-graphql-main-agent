@@ -21,6 +21,15 @@ interface HttpErrorResponse {
 
 type HttpResponse = HttpSuccessResponse | HttpErrorResponse;
 
+// 定义输入参数类型
+interface HttpToolInput {
+  url: string;
+  method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+  headers?: Record<string, any>;
+  body?: any;
+  params?: Record<string, any>;
+}
+
 /**
  * 生成HTTP请求的缓存键
  * 根据请求参数创建唯一的缓存键
@@ -124,19 +133,22 @@ export const HttpTool = createTool({
   id: "http-request",
   description: "Make HTTP requests to external APIs",
   inputSchema: z.object({
-    url: z.string().describe("The URL must provide,default is https://graphql-main-worker.iotex-dev.workers.dev/graphql"),
-    method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH"]).default("GET").describe("The HTTP method to use"),
-    headers: z.record(z.any()).optional().describe("HTTP headers to include in the request. For GraphQL: {'Content-Type': 'application/json', 'x-project-id': 'your-project-id'}"),
-    body: z.any().optional().describe("The request body. For GraphQL: {query: 'query{...}', variables: {...}, operationName: 'OptionalName'}"),
-    params: z.record(z.any()).optional().describe("URL query parameters"),
+    url: z.string(),
+    method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH"]).default("GET"),
+    headers: z.record(z.any()).optional(),
+    body: z.any().optional(),
+    params: z.record(z.any()).optional(),
   }),
-  execute: async ({ context }) => {
+  execute: async (params: any) => {
     try {
+      const context = params.context;
       console.log(context, 'context');
       const result = await handleHTTPRequest(context);
 
       if (result.error === true) {
-        throw new Error(result.message);
+        return {
+          data: result.message
+        }
       }
 
       return {

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { Chat } from "./ai/Chat";
+import { Chat } from "./ai/chat";
 import { KVCache } from "./utils/kv";
 import { DB } from "./utils/db";
 import type { UserSession } from "./storage/UserSession";
@@ -10,8 +10,6 @@ import { MyMCP } from "./ai/mcp";
 import { handleUnifiedChat, handleGlobalChat } from "./router/chat";
 import { ragValidator, handlePineconeRag, handleRagDoc } from "./router/rag";
 import { apiKeyMiddleware, rateLimitMiddleware } from "./router/middleware";
-
-// import { logger } from 'hono/logger'
 
 // Re-export for Durable Objects
 export { Chat };
@@ -75,7 +73,7 @@ app.post("/v1/chat/completions", handleGlobalChat);
 app.post("/v1/rag/pinecone", ragValidator, handlePineconeRag);
 app.get("/rag/doc", handleRagDoc);
 
-// MCP route with authentication handling
+// has some problem, sometimes  chat will in this endpoint
 // app.mount("/", (req, env, ctx) => {
 //   const url = new URL(req.url);
 //   const authParam = url.searchParams.get("authorization");

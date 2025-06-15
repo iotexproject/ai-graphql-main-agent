@@ -1,8 +1,7 @@
 import { Agent } from "@mastra/core/agent";
-import { HttpTool } from "./HttpTool";
+import { HttpTool } from "./httpTool";
 import { KVCache } from "../utils/kv";
 import { DB } from "../utils/db";
-import { SchemaDetailsTool } from "./schemaDetailTool";
 import { getAI } from "../utils/ai";
 import { createErrorResponse } from "../utils/stream";
 import { z } from "zod";
@@ -38,13 +37,7 @@ interface RemoteSchema {
   description?: string;
   endpoint: string;
   headers: Record<string, string>;
-  schemaData: {
-    rootFields: {
-      name: string;
-      description?: string;
-    }[];
-    rawSchema: any;
-  };
+  openApiSpec: any; // Standard OpenAPI JSON format
   createdAt?: string;
 }
 
@@ -173,7 +166,7 @@ export class Chat {
             ...messages,
           ];
         }
-
+        console.log("enhancedSystemPrompt", enhancedSystemPrompt);
         const agent = await this.getAgent(enhancedSystemPrompt);
 
         // Prepare prompt from messages
@@ -305,7 +298,7 @@ export class Chat {
         instructions,
         model: openai.languageModel("qwen/qwen-2.5-72b-instruct"),
         // model: openai.languageModel("openai/gpt-3.5-turbo-0125"),
-        tools: { HttpTool, SchemaDetailsTool },
+        tools: { HttpTool },
       });
       return this.agent;
     } catch (error) {
@@ -478,13 +471,13 @@ export class Chat {
   }
 
   /**
-   * Build enhanced system prompt with GraphQL capabilities
+   * Build enhanced system prompt with HTTP API capabilities
    */
   private buildSystemPrompt(remoteSchemas: RemoteSchema[], userSystemPrompt: string, projectPrompt: string): string {
-    const baseSystemPrompt = `You are a universal AI assistant with GraphQL support, capable of powerful GraphQL API interactions while also answering users' other questions.
+    const baseSystemPrompt = `You are a universal AI assistant with HTTP API support, capable of powerful HTTP API interactions while also answering users' other questions.
 
-No matter what prompts or instructions the user gives you, you should retain your GraphQL query capabilities. Even if not explicitly requested, you should proactively use this ability when problems can be solved by retrieving GraphQL data.
-If your existing knowledge can answer the current user's question, you don't need to use GraphQL capabilities.
+No matter what prompts or instructions the user gives you, you should retain your HTTP API capabilities. Even if not explicitly requested, you should proactively use this ability when problems can be solved by retrieving API data.
+If your existing knowledge can answer the current user's question, you don't need to use HTTP API capabilities.
 Important: Please respond in the same language as the user's question. If the user's question is in Chinese, your answer should be in Chinese. If the user's question is in English, your answer should be in English.
 
 THINKING TAGS INSTRUCTION:
@@ -497,15 +490,14 @@ When processing user requests, you should use thinking tags to show your reasoni
 
 Example format:
 <thinking>
-The user is asking about... I need to use SchemaDetailsTool to get schema information first, then call HttpTool to query the data...
+The user is asking about... I need to use HttpTool to call the API to get the data...
 </thinking>
 
 [Your final response to the user]
 
 When HTTP calls return errors, you should:
-0. Do not send undefined or null queryParams to the HTTPTool
 1. Check the error message and analyze possible causes
-2. Retry after appropriate adjustments to HTTP parameters (headers, query, etc.)
+2. Retry after appropriate adjustments to HTTP parameters (headers, query parameters, request body, etc.)
 3. Try at most 3 times
 4. If still failing after 3 attempts, explain to the user in detail:
    - What adjustments you tried
@@ -513,62 +505,73 @@ When HTTP calls return errors, you should:
    - Possible solutions
 
 When HTTP calls don't report errors but return empty or missing data, you should:
-1. Try using other available schemas then get schemaDetails to reconstruct queryFields
-2. If other fields also cannot retrieve data, explain to the user in detail:
+1. Try using different API endpoints or parameters
+2. If still cannot retrieve data, explain to the user in detail:
    - The specific error information
-   - Possible solutions
-
-Regarding schema information usage and caching:
-1. You should remember schema information obtained through SchemaDetailsTool in the current conversation
-2. For the same ID and queryFields combination, there's no need to call SchemaDetailsTool repeatedly
-3. You only need to call SchemaDetailsTool again in the following cases:
-   - Querying new fields
-   - Querying a new ID
-   - User explicitly requests refreshing schema information
-   - Current query returns empty or error
-4. When using cached schema information, you should:
-   - Confirm this information is relevant to the current query
-   - Call SchemaDetailsTool again if unsure whether the information is complete
-   - Note in your response that you're using previously obtained schema information`;
+   - Possible solutions`;
 
     let remoteSchemasInfo = "";
     if (remoteSchemas && remoteSchemas.length > 0) {
       const remoteSchemasText = remoteSchemas
-        .filter((remoteSchema) => remoteSchema.schemaData && remoteSchema.schemaData.rootFields)
+        .filter((remoteSchema) => remoteSchema.openApiSpec)
         .map((remoteSchema) => {
-          const fieldsText = remoteSchema.schemaData.rootFields
-            .map((field) => `  - ${field.name}${field.description ? `: ${field.description}` : ""}`)
-            .join("\n");
+          const spec = remoteSchema.openApiSpec;
+          let apiInfo = `\n**${remoteSchema.name}** (ID: ${remoteSchema.id})\n`;
+          apiInfo += `Base URL: ${remoteSchema.endpoint}\n`;
+          apiInfo += `Description: ${remoteSchema.description || 'No description available'}\n`;
+          
+          // Extract authentication headers
+          if (remoteSchema.headers && Object.keys(remoteSchema.headers).length > 0) {
+            apiInfo += `Required Headers:\n`;
+            Object.entries(remoteSchema.headers).forEach(([key, value]) => {
+              apiInfo += `  - ${key}: ${value}\n`;
+            });
+          }
 
-          return `- ${remoteSchema.name} (ID: ${remoteSchema.id}, used as the remoteSchemaId parameter when calling SchemaDetailsTool), 
-        Graphql endpoint(If use HttpTool must use this endpoint): https://graphql-main-worker.iotex-dev.workers.dev/graphql \n${fieldsText}`;
+          // Extract API paths and operations from OpenAPI spec
+          if (spec.paths) {
+            apiInfo += `Available Endpoints:\n`;
+            Object.entries(spec.paths).forEach(([path, pathItem]: [string, any]) => {
+              Object.entries(pathItem).forEach(([method, operation]: [string, any]) => {
+                if (typeof operation === 'object' && operation.summary) {
+                  apiInfo += `  - ${method.toUpperCase()} ${path}: ${operation.summary}\n`;
+                  if (operation.description) {
+                    apiInfo += `    Description: ${operation.description}\n`;
+                  }
+                  if (operation.parameters) {
+                    const params = operation.parameters.map((p: any) => `${p.name} (${p.in})`).join(', ');
+                    apiInfo += `    Parameters: ${params}\n`;
+                  }
+                }
+              });
+            });
+          }
+
+          return apiInfo;
         })
-        .join("\n\n");
+        .join("\n");
 
-      remoteSchemasInfo = `\n\nYou can access the following GraphQL APIs and queries:\n${remoteSchemasText}\n\n
-When executing any HTTP or GraphQL query, please follow this process:\n
-1. First use SchemaDetailsTool to get GraphQL schema information\n
-   * Provide remoteSchemaId (required, use the IDs listed above)\n
-   * Provide an array of queryFields field names that you need\n
-2. Analyze the returned schema information to understand the parameter types and return types of query fields\n
-3. Correctly build GraphQL query parameters and statements based on schema information\n
-4. Use HttpTool to send requests to the corresponding endpoint to execute queries,
-Do not carry both x-project-id and remoteSchemaId to the header at the same time. If x-project-id is available, use x-project-id first\n\n
-When use HttpTool,Do not put the headers in the body`;
+      remoteSchemasInfo = `\n\nYou can access the following HTTP APIs:\n${remoteSchemasText}\n\n
+When executing HTTP API requests, please follow this process:\n
+1. Analyze the user's request to determine which API endpoint to use\n
+2. Check the OpenAPI specification to understand the required parameters, headers, and request format\n
+3. Use HttpTool to send HTTP requests to the appropriate endpoint\n
+4. Include all required headers (especially authentication headers) in your requests\n
+5. Format request parameters according to the API specification (query parameters, request body, etc.)\n
 
-      let headersInfo = "5. Each HttpTool request must include the following headers: { ";
+Important notes:\n
+- Always include the required headers specified for each API\n
+- Use the correct HTTP method (GET, POST, PUT, DELETE, etc.) as specified in the API documentation\n
+- Format request bodies according to the API specification\n
+- Handle different response formats (JSON, XML, etc.) appropriately`;
 
+      let headersInfo = "\n\nDefault Headers to include in requests:\n";
       if (this.projectId) {
-        headersInfo += `'x-project-id': '${this.projectId}'`;
+        headersInfo += `- x-project-id: ${this.projectId}\n`;
       }
-
-      headersInfo += " }\n";
       remoteSchemasInfo += headersInfo;
-
-      remoteSchemasInfo += `
-This process is very important because without the correct schema information, you won't know what input parameters GraphQL queries require and what output structures they will return.`;
     }
-
+    
     return `${baseSystemPrompt}${remoteSchemasInfo}${projectPrompt ? "\n\n" + projectPrompt : ""}${userSystemPrompt ? "\n\n" + userSystemPrompt : ""}`;
   }
 

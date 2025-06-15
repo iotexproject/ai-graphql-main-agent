@@ -7,7 +7,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { handleSchemaDetails, handleListSchemas } from "../utils/tool-handlers";
-import { handleHTTPRequest } from "./HttpTool";
+import { handleHTTPRequest } from "./httpTool";
 
 type Bindings = Env;
 type Props = {
@@ -67,7 +67,7 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
           },
           {
             name: "schema_details",
-            description: "Get detailed information about GraphQL schema fields, including arguments, input and output types",
+            description: "Get detailed information about API schema fields and endpoints from OpenAPI specifications",
             inputSchema: {
               type: "object",
               properties: {
@@ -80,7 +80,7 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
                   items: {
                     type: "string",
                   },
-                  description: "List of field names to get details for (can be query or mutation fields)",
+                  description: "List of field names to get details for from the OpenAPI specification",
                 },
               },
               required: ["queryFields"],
@@ -88,7 +88,7 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
           },
           {
             name: "http_request",
-            description: "Send HTTP requests to external APIs, including GraphQL endpoints",
+            description: "Send HTTP requests to external APIs based on OpenAPI specifications",
             inputSchema: {
               type: "object",
               properties: {

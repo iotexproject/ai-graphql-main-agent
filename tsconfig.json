@@ -43,7 +43,6 @@
     // "typeRoots": [],                                  /* Specify multiple folders that act like './node_modules/@types'. */
     "types": [
       "node",
-      "vite/client",
       "./worker-configuration.d.ts"
     ] /* Specify type package names to be included without being referenced in a source file. */,
     // "allowUmdGlobalAccess": true,                     /* Allow accessing UMD globals from modules. */
@@ -119,7 +118,10 @@
 
     /* Completeness */
     // "skipDefaultLibCheck": true,                      /* Skip type checking .d.ts files that are included with TypeScript. */
-    "skipLibCheck": true /* Skip type checking all .d.ts files. */
+    "skipLibCheck": true /* Skip type checking all .d.ts files. */,
+    
+    /* Additional options to help with deep type instantiation */
+    "noErrorTruncation": false /* Truncate error messages to avoid excessive output */
   },
   "exclude": ["tests"]
 }

@@ -502,6 +502,55 @@ The user is asking about... I need to use SchemaDetailsTool to get schema inform
 
 [Your final response to the user]
 
+CRITICAL HTTPTOOL USAGE INSTRUCTIONS:
+When using HttpTool, you must follow these strict rules:
+1. NEVER pass undefined, null, or empty string as the url parameter
+2. ALWAYS ensure the url parameter is a valid, complete HTTP/HTTPS URL
+3. The url must be fully constructed before calling HttpTool
+4. If you don't have a valid URL, do not call HttpTool - explain to the user what information is needed
+5. Double-check that all required URL components are present and valid before making the call
+6. For GraphQL endpoints, always use the complete endpoint URL provided in the schema information
+7. ALWAYS provide the HttpTool parameters in the correct format:
+   - url: (required) Complete HTTP/HTTPS URL string
+   - method: (required) HTTP method like "GET", "POST", "PUT", "DELETE", "PATCH"
+   - headers: (optional) Object with header key-value pairs
+   - body: (optional) Request body data
+   - params: (optional) URL query parameters object
+8. Example correct HttpTool call format:
+   {
+     "url": "https://graphql-main-worker.iotex-dev.workers.dev/graphql",
+     "method": "POST",
+     "headers": {
+       "Content-Type": "application/json",
+       "x-project-id": "your-project-id"
+     },
+     "body": {
+       "query": "query { your_query_here }"
+     }
+   }
+9. NEVER call HttpTool with empty object {} or missing required parameters
+
+CRITICAL SCHEMADETAILSTOOL USAGE INSTRUCTIONS:
+When using SchemaDetailsTool, you must follow these strict rules:
+1. ALWAYS provide either remoteSchemaId OR marketplaceId (one is required, not both)
+2. For project-based queries, use remoteSchemaId with the ID from the available remote schemas
+3. For marketplace queries, use marketplaceId
+4. ALWAYS provide queryFields as an array of string field names you want to query
+5. NEVER pass undefined, null, or empty values for required parameters
+6. Example correct SchemaDetailsTool call format:
+   {
+     "remoteSchemaId": "your-remote-schema-id",
+     "queryFields": ["latest_news", "user_profile", "search_data"]
+   }
+   OR
+   {
+     "marketplaceId": "your-marketplace-id", 
+     "queryFields": ["marketplace_items", "categories"]
+   }
+7. Do NOT use mutationFields parameter (deprecated), use queryFields for both queries and mutations
+8. Ensure queryFields contains actual field names that exist in the schema
+9. NEVER call SchemaDetailsTool with empty object {} or without the required remoteSchemaId/marketplaceId
+
 When HTTP calls return errors, you should:
 0. Do not send undefined or null queryParams to the HTTPTool
 1. Check the error message and analyze possible causes

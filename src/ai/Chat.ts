@@ -5,6 +5,7 @@ import { DB } from "../utils/db";
 import { getAI } from "../utils/ai";
 import { createErrorResponse } from "../utils/stream";
 import { z } from "zod";
+import { createAPISelector } from "./apiSelector";
 
 // Environment interface for Cloudflare Workers
 interface Env {
@@ -137,11 +138,50 @@ export class Chat {
         // Extract system messages from user input
         const userSystemMessages = messages.filter(msg => msg.role === "system");
         const userSystemPrompt = userSystemMessages.length > 0 ? userSystemMessages[0].content : "";
+        
+        // 提取用户消息
+        const userMessage = messages[messages.length - 1]?.content || "";
+        
         if (controller) {
-          controller.enqueue(encoder.encode(formatStreamingData("<thinking>Fetching remote schemas...</thinking>\n", streamId)));
+          controller.enqueue(encoder.encode(formatStreamingData("<thinking>Starting to select the appropriate agent...</thinking>\n", streamId)));
         }
+        
         const [remoteSchemas, project] = await Promise.all([this.getRemoteSchemas(), this.getProjectById({ projectId: this.projectId! })]);
-        const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, userSystemPrompt, project?.prompt || '');
+        
+        // 创建API选择器实例
+        const apiSelector = createAPISelector(this.env.OPENROUTER_API_KEY);
+        
+        // 第一阶段：选择相关的API，并输出thinking过程
+        const selectionResult = await apiSelector.selectRelevantAPIs(
+          userMessage, 
+          remoteSchemas,
+          (thinking) => {
+            if (controller) {
+              controller.enqueue(encoder.encode(formatStreamingData(thinking + "\n", streamId)));
+            }
+          }
+        );
+        
+        if (selectionResult.shouldUseSonar) {
+          // 没有选择到合适的API，使用sonar模型直接回答
+          if (controller) {
+            controller.enqueue(encoder.encode(formatStreamingData(`<thinking>${selectionResult.reasoning}, using web search to answer the question...</thinking>\n`, streamId)));
+          }
+          return await this.useSoraModelInDO({ ...body, messages }, controller);
+        }
+        
+        if (controller) {
+          controller.enqueue(encoder.encode(formatStreamingData(`<thinking>${selectionResult.reasoning}, starting to process the task...</thinking>\n`, streamId)));
+        }
+        
+        // 第二阶段：使用贵模型和选中的API构建优化的系统提示
+        const enhancedSystemPrompt = apiSelector.buildOptimizedSystemPrompt(
+          selectionResult.selectedAPIs,
+          remoteSchemas,
+          userSystemPrompt, 
+          project?.prompt || '',
+          this.projectId || undefined
+        );
 
         // Update session with enhanced system prompt
         if (enhancedSystemPrompt &&
@@ -194,7 +234,12 @@ export class Chat {
       if (body.stream === true) {
         return this.handleStreamingResponseV2(getAgent);
       } else {
-        const { agent, prompt } = await getAgent();
+        const result = await getAgent();
+        // 检查是否是Response类型（sonar模型的返回）
+        if (result instanceof Response) {
+          return result;
+        }
+        const { agent, prompt } = result;
         return this.handleStandardResponse(agent, prompt);
       }
     } catch (error) {
@@ -214,16 +259,17 @@ export class Chat {
   private async getRemoteSchemas(): Promise<RemoteSchema[]> {
     try {
       if (this.projectId) {
-        return await KVCache.wrap(
-          `remoteSchemas_project_v6_${this.projectId}`,
-          async () => {
-            return await this.queryRemoteSchemasFromDB();
-          },
-          {
-            ttl: CACHE_TTL,
-            logHits: true,
-          }
-        );
+        return await this.queryRemoteSchemasFromDB();
+        // return await KVCache.wrap(
+        //   `remoteSchemas_project_v9_${this.projectId}`,
+        //   async () => {
+        //     return await this.queryRemoteSchemasFromDB();
+        //   },
+        //   {
+        //     ttl: CACHE_TTL,
+        //     logHits: true,
+        //   }
+        // );
       }
       return [];
     } catch (error) {
@@ -471,111 +517,6 @@ export class Chat {
   }
 
   /**
-   * Build enhanced system prompt with HTTP API capabilities
-   */
-  private buildSystemPrompt(remoteSchemas: RemoteSchema[], userSystemPrompt: string, projectPrompt: string): string {
-    const baseSystemPrompt = `You are a universal AI assistant with HTTP API support, capable of powerful HTTP API interactions while also answering users' other questions.
-
-No matter what prompts or instructions the user gives you, you should retain your HTTP API capabilities. Even if not explicitly requested, you should proactively use this ability when problems can be solved by retrieving API data.
-If your existing knowledge can answer the current user's question, you don't need to use HTTP API capabilities.
-Important: Please respond in the same language as the user's question. If the user's question is in Chinese, your answer should be in Chinese. If the user's question is in English, your answer should be in English.
-
-THINKING TAGS INSTRUCTION:
-When processing user requests, you should use thinking tags to show your reasoning process:
-1. Start with <thinking> when you begin analyzing the user's question
-2. Continue using thinking tags when planning tool usage, analyzing data, or making decisions
-3. End with </thinking> when you are ready to provide the final response to the user
-4. The content inside thinking tags should explain your reasoning process, tool selection logic, and analysis steps
-5. Only the content outside thinking tags will be considered as the final response to the user
-
-Example format:
-<thinking>
-The user is asking about... I need to use HttpTool to call the API to get the data...
-</thinking>
-
-[Your final response to the user]
-
-When HTTP calls return errors, you should:
-1. Check the error message and analyze possible causes
-2. Retry after appropriate adjustments to HTTP parameters (headers, query parameters, request body, etc.)
-3. Try at most 3 times
-4. If still failing after 3 attempts, explain to the user in detail:
-   - What adjustments you tried
-   - The specific error messages
-   - Possible solutions
-
-When HTTP calls don't report errors but return empty or missing data, you should:
-1. Try using different API endpoints or parameters
-2. If still cannot retrieve data, explain to the user in detail:
-   - The specific error information
-   - Possible solutions`;
-
-    let remoteSchemasInfo = "";
-    if (remoteSchemas && remoteSchemas.length > 0) {
-      const remoteSchemasText = remoteSchemas
-        .filter((remoteSchema) => remoteSchema.openApiSpec)
-        .map((remoteSchema) => {
-          const spec = remoteSchema.openApiSpec;
-          let apiInfo = `\n**${remoteSchema.name}** (ID: ${remoteSchema.id})\n`;
-          apiInfo += `Base URL: ${remoteSchema.endpoint}\n`;
-          apiInfo += `Description: ${remoteSchema.description || 'No description available'}\n`;
-          
-          // Extract authentication headers
-          if (remoteSchema.headers && Object.keys(remoteSchema.headers).length > 0) {
-            apiInfo += `Required Headers:\n`;
-            Object.entries(remoteSchema.headers).forEach(([key, value]) => {
-              apiInfo += `  - ${key}: ${value}\n`;
-            });
-          }
-
-          // Extract API paths and operations from OpenAPI spec
-          if (spec.paths) {
-            apiInfo += `Available Endpoints:\n`;
-            Object.entries(spec.paths).forEach(([path, pathItem]: [string, any]) => {
-              Object.entries(pathItem).forEach(([method, operation]: [string, any]) => {
-                if (typeof operation === 'object' && operation.summary) {
-                  apiInfo += `  - ${method.toUpperCase()} ${path}: ${operation.summary}\n`;
-                  if (operation.description) {
-                    apiInfo += `    Description: ${operation.description}\n`;
-                  }
-                  if (operation.parameters) {
-                    const params = operation.parameters.map((p: any) => `${p.name} (${p.in})`).join(', ');
-                    apiInfo += `    Parameters: ${params}\n`;
-                  }
-                }
-              });
-            });
-          }
-
-          return apiInfo;
-        })
-        .join("\n");
-
-      remoteSchemasInfo = `\n\nYou can access the following HTTP APIs:\n${remoteSchemasText}\n\n
-When executing HTTP API requests, please follow this process:\n
-1. Analyze the user's request to determine which API endpoint to use\n
-2. Check the OpenAPI specification to understand the required parameters, headers, and request format\n
-3. Use HttpTool to send HTTP requests to the appropriate endpoint\n
-4. Include all required headers (especially authentication headers) in your requests\n
-5. Format request parameters according to the API specification (query parameters, request body, etc.)\n
-
-Important notes:\n
-- Always include the required headers specified for each API\n
-- Use the correct HTTP method (GET, POST, PUT, DELETE, etc.) as specified in the API documentation\n
-- Format request bodies according to the API specification\n
-- Handle different response formats (JSON, XML, etc.) appropriately`;
-
-      let headersInfo = "\n\nDefault Headers to include in requests:\n";
-      if (this.projectId) {
-        headersInfo += `- x-project-id: ${this.projectId}\n`;
-      }
-      remoteSchemasInfo += headersInfo;
-    }
-    
-    return `${baseSystemPrompt}${remoteSchemasInfo}${projectPrompt ? "\n\n" + projectPrompt : ""}${userSystemPrompt ? "\n\n" + userSystemPrompt : ""}`;
-  }
-
-  /**
    * Handle global chat logic within Durable Object
    */
   private async handleGlobalChatInDO(body: ChatRequestBody): Promise<Response> {
@@ -595,7 +536,7 @@ Important notes:\n
         const encoder = new TextEncoder();
         const streamId = "chatcmpl-" + Date.now().toString(36);
         const userMessage = requestMessages[requestMessages.length - 1]?.content || "";
-        controller?.enqueue(encoder.encode(formatStreamingData("<thinking>Start to select the appropriate agent...</thinking>\n", streamId)));
+        controller?.enqueue(encoder.encode(formatStreamingData("<thinking>Starting to select the appropriate agent...</thinking>\n", streamId)));
         const publishedProjects = await DB.getPublishedProjects();
         console.log(publishedProjects.length, "publishedProjects");
 
@@ -656,8 +597,38 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
           processMessages.push({ role: "user", content: body.message });
         }
 
+        // 使用API选择器优化全局聊天
         const remoteSchemas = await this.getRemoteSchemas();
-        const enhancedSystemPrompt = this.buildSystemPrompt(remoteSchemas, "", selectedProject?.prompt || '');
+        const apiSelector = createAPISelector(this.env.OPENROUTER_API_KEY);
+        const apiSelectionResult = await apiSelector.selectRelevantAPIs(
+          userMessage, 
+          remoteSchemas,
+          (thinking) => {
+            if (controller) {
+              controller.enqueue(encoder.encode(formatStreamingData(thinking, streamId)));
+            }
+          }
+        );
+        
+        if (apiSelectionResult.shouldUseSonar) {
+          // 没有合适的API，使用sonar模型
+          if (controller) {
+            controller.enqueue(encoder.encode(formatStreamingData(`<thinking>Project ${selectedProject.name} has no relevant APIs, using web search to answer...</thinking>\n`, streamId)));
+          }
+          return await this.useSoraModelInDO(body, controller);
+        }
+        
+        if (controller) {
+          controller.enqueue(encoder.encode(formatStreamingData(`<thinking>Using selected APIs from project ${selectedProject.name} to process the task...</thinking>\n`, streamId)));
+        }
+
+        const enhancedSystemPrompt = apiSelector.buildOptimizedSystemPrompt(
+          apiSelectionResult.selectedAPIs,
+          remoteSchemas,
+          "", 
+          selectedProject?.prompt || '',
+          this.projectId || undefined
+        );
 
         const agent = await this.getAgent(enhancedSystemPrompt);
         const prompt = processMessages
@@ -679,8 +650,8 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
         return this.handleStreamingResponseV2(getAgent);
       } else {
         const result: any = await getAgent();
-        if (!result.agent) {
-          return result
+        if (result instanceof Response) {
+          return result;
         }
         return this.handleStandardResponse(result.agent, result.prompt);
       }

@@ -1,11 +1,13 @@
 import { Agent } from "@mastra/core/agent";
-import { HttpTool } from "./httpTool";
 import { KVCache } from "../utils/kv";
 import { DB } from "../utils/db";
 import { getAI } from "../utils/ai";
 import { createErrorResponse } from "../utils/stream";
 import { z } from "zod";
-import { createAPISelector } from "./apiSelector";
+import { ThinkingSimulator } from "./thinkingSimulator";
+import { HttpTool } from "./httpTool";
+// 备选方案：API选择器导入（目前注释掉）
+// import { createAPISelector } from "./apiSelector";
 
 // Environment interface for Cloudflare Workers
 interface Env {
@@ -135,6 +137,10 @@ export class Chat {
       const getAgent = async (controller?: ReadableStreamDefaultController) => {
         const encoder = new TextEncoder();
         const streamId = "chatcmpl-" + Date.now().toString(36);
+        
+        // 创建思考模拟器
+        const thinkingSimulator = controller ? new ThinkingSimulator(controller, streamId) : null;
+        
         // Extract system messages from user input
         const userSystemMessages = messages.filter(msg => msg.role === "system");
         const userSystemPrompt = userSystemMessages.length > 0 ? userSystemMessages[0].content : "";
@@ -142,41 +148,55 @@ export class Chat {
         // 提取用户消息
         const userMessage = messages[messages.length - 1]?.content || "";
         
-        if (controller) {
-          controller.enqueue(encoder.encode(formatStreamingData("<thinking>Starting to select the appropriate agent...</thinking>\n", streamId)));
+        // 第一阶段：开始加载思考（不等待完成）
+        let loadingThinkingActive = false;
+        if (thinkingSimulator) {
+          const loadingContent = ThinkingSimulator.getRandomThinkingContent('loading');
+          thinkingSimulator.startThinking(loadingContent); // 不await，让它并行执行
+          loadingThinkingActive = true;
         }
         
         const [remoteSchemas, project] = await Promise.all([this.getRemoteSchemas(), this.getProjectById({ projectId: this.projectId! })]);
         
-        // 创建API选择器实例
-        const apiSelector = createAPISelector(this.env.OPENROUTER_API_KEY);
+        // 备选方案：使用API选择器（目前注释掉）
+        // const apiSelector = createAPISelector(this.env.OPENROUTER_API_KEY);
+        // const selectionResult = await apiSelector.selectRelevantAPIs(
+        //   userMessage, 
+        //   remoteSchemas,
+        //   (thinking) => {
+        //     if (controller) {
+        //       controller.enqueue(encoder.encode(formatStreamingData(thinking + "\n", streamId)));
+        //     }
+        //   }
+        // );
         
-        // 第一阶段：选择相关的API，并输出thinking过程
-        const selectionResult = await apiSelector.selectRelevantAPIs(
-          userMessage, 
-          remoteSchemas,
-          (thinking) => {
-            if (controller) {
-              controller.enqueue(encoder.encode(formatStreamingData(thinking + "\n", streamId)));
-            }
-          }
-        );
+        // if (selectionResult.shouldUseSonar) {
+        //   if (controller) {
+        //     controller.enqueue(encoder.encode(formatStreamingData(`<thinking>${selectionResult.reasoning}, using web search to answer the question...</thinking>\n`, streamId)));
+        //   }
+        //   return await this.useSoraModelInDO({ ...body, messages }, controller);
+        // }
         
-        if (selectionResult.shouldUseSonar) {
-          // 没有选择到合适的API，使用sonar模型直接回答
-          if (controller) {
-            controller.enqueue(encoder.encode(formatStreamingData(`<thinking>${selectionResult.reasoning}, using web search to answer the question...</thinking>\n`, streamId)));
+        // 正常方案：直接使用所有API
+        if (remoteSchemas.length === 0) {
+          // 没有API可用，使用sonar模型
+          if (thinkingSimulator && loadingThinkingActive) {
+            thinkingSimulator.forceComplete(); // 强制结束loading思考
+            const noApiContent = "Current project has no API interfaces configured, will use web search to answer your question...";
+            await thinkingSimulator.startThinking(noApiContent);
           }
           return await this.useSoraModelInDO({ ...body, messages }, controller);
         }
         
-        if (controller) {
-          controller.enqueue(encoder.encode(formatStreamingData(`<thinking>${selectionResult.reasoning}, starting to process the task...</thinking>\n`, streamId)));
+        // 数据加载完成，结束loading思考，开始answering思考
+        if (thinkingSimulator && loadingThinkingActive) {
+          thinkingSimulator.forceComplete(); // 强制结束loading思考
+          const answeringContent = ThinkingSimulator.getRandomThinkingContent('answering');
+          thinkingSimulator.startThinking(answeringContent); // 不await，让它并行执行
         }
         
-        // 第二阶段：使用贵模型和选中的API构建优化的系统提示
-        const enhancedSystemPrompt = apiSelector.buildOptimizedSystemPrompt(
-          selectionResult.selectedAPIs,
+        // 构建包含所有API的系统提示词
+        const enhancedSystemPrompt = this.buildSystemPromptWithAllAPIs(
           remoteSchemas,
           userSystemPrompt, 
           project?.prompt || '',
@@ -207,6 +227,12 @@ export class Chat {
           ];
         }
         console.log("enhancedSystemPrompt", enhancedSystemPrompt);
+        
+        // 开始创建agent，结束answering思考
+        if (thinkingSimulator) {
+          thinkingSimulator.forceComplete(); // 强制结束answering思考
+        }
+        
         const agent = await this.getAgent(enhancedSystemPrompt);
 
         // Prepare prompt from messages
@@ -373,10 +399,30 @@ export class Chat {
             return
           }
           const response = await agent.stream(prompt);
-          controller.enqueue(encoder.encode(formatStreamingData("<thinking>Starting to answer the question...</thinking>\n", streamId)));
+          
+          // 使用思考模拟器来输出最后的思考阶段
+          const finalThinkingContents = [
+            "All preparations are complete, I'm ready to provide you with a detailed answer...",
+            "I'm calling relevant APIs to get the latest data and organize information...",
+            "Starting to perform intelligent analysis and data processing tasks...",
+            "I'm ready, I'll provide you with a professional answer and advice right away...",
+            "System is ready, starting to generate an answer based on API data..."
+          ];
+          const finalContent = finalThinkingContents[Math.floor(Math.random() * finalThinkingContents.length)];
+          
+          const finalThinkingSimulator = new ThinkingSimulator(controller, streamId);
+          const thinkingPromise = finalThinkingSimulator.startThinking(finalContent);
+          
+          let hasStartedAIOutput = false;
+
           let errorMessage = "";
           for await (const part of response.fullStream) {
             if (part.type === "text-delta") {
+              if (!hasStartedAIOutput) {
+                hasStartedAIOutput = true;
+                finalThinkingSimulator.forceComplete();
+              }
+              
               // console.log("Text delta received:", part.textDelta);
               controller.enqueue(
                 encoder.encode(formatStreamingData(part.textDelta, streamId))
@@ -535,15 +581,33 @@ export class Chat {
       const getAgent = async (controller?: ReadableStreamDefaultController) => {
         const encoder = new TextEncoder();
         const streamId = "chatcmpl-" + Date.now().toString(36);
+        
+        // 创建思考模拟器
+        const thinkingSimulator = controller ? new ThinkingSimulator(controller, streamId) : null;
+        
         const userMessage = requestMessages[requestMessages.length - 1]?.content || "";
-        controller?.enqueue(encoder.encode(formatStreamingData("<thinking>Starting to select the appropriate agent...</thinking>\n", streamId)));
+        
+        // 第一阶段：开始选择项目的思考（不等待完成）
+        let selectionThinkingActive = false;
+        if (thinkingSimulator) {
+          const selectionContent = "Analyzing your question and selecting the most suitable project to answer...";
+          thinkingSimulator.startThinking(selectionContent); // 不await，让它并行执行
+          selectionThinkingActive = true;
+        }
+        
         const publishedProjects = await DB.getPublishedProjects();
         console.log(publishedProjects.length, "publishedProjects");
 
         if (publishedProjects.length === 0) {
           // Use sora model logic here - we need to implement this in DO
+          if (thinkingSimulator && selectionThinkingActive) {
+            thinkingSimulator.forceComplete(); // 结束选择思考
+            const noProjectContent = "No available projects found, will use web search to answer your question...";
+            await thinkingSimulator.startThinking(noProjectContent);
+          }
           return await this.useSoraModelInDO(body, controller);
         }
+        
         const projectsInfo = publishedProjects.map((project, index) =>
           `[Project ${index + 1}]
 ID: ${project.id}
@@ -583,6 +647,11 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
         const selectedProject = publishedProjects.find(p => p.id == selectedProjectId);
         if (!selectedProject) {
           console.log("No suitable project found, using sora model");
+          if (thinkingSimulator && selectionThinkingActive) {
+            thinkingSimulator.forceComplete(); // 结束选择思考
+            const noSuitableProjectContent = "No suitable project found to answer this question, will use web search...";
+            await thinkingSimulator.startThinking(noSuitableProjectContent);
+          }
           return await this.useSoraModelInDO(body, controller);
         }
 
@@ -597,39 +666,57 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
           processMessages.push({ role: "user", content: body.message });
         }
 
-        // 使用API选择器优化全局聊天
+        // 项目选择完成，结束选择思考，开始API准备思考
+        if (thinkingSimulator && selectionThinkingActive) {
+          thinkingSimulator.forceComplete(); // 结束选择思考
+        }
+
         const remoteSchemas = await this.getRemoteSchemas();
-        const apiSelector = createAPISelector(this.env.OPENROUTER_API_KEY);
-        const apiSelectionResult = await apiSelector.selectRelevantAPIs(
-          userMessage, 
-          remoteSchemas,
-          (thinking) => {
-            if (controller) {
-              controller.enqueue(encoder.encode(formatStreamingData(thinking, streamId)));
-            }
-          }
-        );
+        // 备选方案：使用API选择器（目前注释掉）
+        // const apiSelector = createAPISelector(this.env.OPENROUTER_API_KEY);
+        // const apiSelectionResult = await apiSelector.selectRelevantAPIs(
+        //   userMessage, 
+        //   remoteSchemas,
+        //   (thinking) => {
+        //     if (controller) {
+        //       controller.enqueue(encoder.encode(formatStreamingData(thinking, streamId)));
+        //     }
+        //   }
+        // );
         
-        if (apiSelectionResult.shouldUseSonar) {
-          // 没有合适的API，使用sonar模型
-          if (controller) {
-            controller.enqueue(encoder.encode(formatStreamingData(`<thinking>Project ${selectedProject.name} has no relevant APIs, using web search to answer...</thinking>\n`, streamId)));
+        // if (apiSelectionResult.shouldUseSonar) {
+        //   // 没有合适的API，使用sonar模型
+        //   if (controller) {
+        //     controller.enqueue(encoder.encode(formatStreamingData(`<thinking>Project ${selectedProject.name} has no relevant APIs, using web search to answer...</thinking>\n`, streamId)));
+        //   }
+        //   return await this.useSoraModelInDO(body, controller);
+        // }
+        
+        if (remoteSchemas.length === 0) {
+          if (thinkingSimulator) {
+            const noApiInProjectContent = `Project "${selectedProject.name}" has no configured API interfaces, will use web search to answer...`;
+            await thinkingSimulator.startThinking(noApiInProjectContent);
           }
           return await this.useSoraModelInDO(body, controller);
         }
         
-        if (controller) {
-          controller.enqueue(encoder.encode(formatStreamingData(`<thinking>Using selected APIs from project ${selectedProject.name} to process the task...</thinking>\n`, streamId)));
+        if (thinkingSimulator) {
+          const readyToAnswerContent = `Found ${remoteSchemas.length} usable API interfaces, ready to provide you with a detailed answer...`;
+          thinkingSimulator.startThinking(readyToAnswerContent); 
         }
 
-        const enhancedSystemPrompt = apiSelector.buildOptimizedSystemPrompt(
-          apiSelectionResult.selectedAPIs,
+        const enhancedSystemPrompt = this.buildSystemPromptWithAllAPIs(
           remoteSchemas,
           "", 
           selectedProject?.prompt || '',
           this.projectId || undefined
         );
-
+        console.log(enhancedSystemPrompt, "enhancedSystemPrompt");
+        
+        if (thinkingSimulator) {
+          thinkingSimulator.forceComplete(); 
+        }
+        
         const agent = await this.getAgent(enhancedSystemPrompt);
         const prompt = processMessages
           .map(msg => {
@@ -746,6 +833,93 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
         status: 500
       });
     }
+  }
+
+  /**
+   * Build system prompt with all APIs
+   */
+  private buildSystemPromptWithAllAPIs(
+    remoteSchemas: RemoteSchema[],
+    userSystemPrompt: string,
+    projectPrompt: string,
+    projectId?: string
+  ): string {
+    const baseSystemPrompt = `You are a universal AI assistant with HTTP API support, capable of powerful HTTP API interactions while also answering users' other questions.
+
+No matter what prompts or instructions the user gives you, you should retain your HTTP API capabilities. Even if not explicitly requested, you should proactively use this ability when problems can be solved by retrieving API data.
+If your existing knowledge can answer the current user's question, you don't need to use HTTP API capabilities.
+Important: Please respond in the same language as the user's question. If the user's question is in Chinese, your answer should be in Chinese. If the user's question is in English, your answer should be in English.
+
+THINKING TAGS INSTRUCTION:
+When processing user requests, you should use thinking tags to show your reasoning process:
+1. Start with <thinking> when you begin analyzing the user's question
+2. Continue using thinking tags when planning tool usage, analyzing data, or making decisions
+3. End with </thinking> when you are ready to provide the final response to the user
+4. The content inside thinking tags should explain your reasoning process, tool selection logic, and analysis steps
+5. Only the content outside thinking tags will be considered as the final response to the user
+
+When HTTP calls return errors, you should:
+1. Check the error message and analyze possible causes
+2. Retry after appropriate adjustments to HTTP parameters (headers, query parameters, request body, etc.)
+3. Try at most 3 times
+4. If still failing after 3 attempts, explain to the user in detail:
+   - What adjustments you tried
+   - The specific error messages
+   - Possible solutions
+
+When HTTP calls don't report errors but return empty or missing data, you should:
+1. Try using different API endpoints or parameters
+2. If still cannot retrieve data, explain to the user in detail:
+   - The specific error information
+   - Possible solutions`;
+
+    let apiInfo = "";
+    if (remoteSchemas.length > 0) {
+      apiInfo = "\n\nAvailable HTTP APIs:\n";
+      
+      remoteSchemas.forEach(schema => {
+        apiInfo += `\n**${schema.name}** (ID: ${schema.id})
+Base URL: ${schema.endpoint}
+Description: ${schema.description || 'No description available'}
+Required Headers:`;
+        
+        if (schema.headers && Object.keys(schema.headers).length > 0) {
+          Object.entries(schema.headers).forEach(([key, value]) => {
+            apiInfo += `\n  - ${key}: ${value}`;
+          });
+        }
+        
+        if (schema.openApiSpec && schema.openApiSpec.paths) {
+          apiInfo += `\n\nEndpoints:`;
+          Object.entries(schema.openApiSpec.paths).forEach(([path, pathItem]: [string, any]) => {
+            Object.entries(pathItem).forEach(([method, operation]: [string, any]) => {
+              if (typeof operation === 'object' && operation.summary) {
+                apiInfo += `\n  - ${method.toUpperCase()} ${path}: ${operation.summary}`;
+                if (operation.description) {
+                  apiInfo += `\n    Description: ${operation.description}`;
+                }
+                if (operation.parameters && operation.parameters.length > 0) {
+                  apiInfo += `\n    Parameters:`;
+                  operation.parameters.forEach((param: any) => {
+                    apiInfo += `\n      - ${param.name} (${param.in}${param.required ? ', required' : ', optional'}): ${param.description || 'No description'}`;
+                  });
+                }
+              }
+            });
+          });
+        }
+        
+        apiInfo += "\n";
+      });
+
+      let headersInfo = "\nDefault Headers to include in requests:\n";
+      if (projectId) {
+        headersInfo += `- x-project-id: ${projectId}\n`;
+      }
+      apiInfo += headersInfo;
+    }
+    
+    return `${baseSystemPrompt}${apiInfo}${projectPrompt ? "\n\n" + projectPrompt : ""}${userSystemPrompt ? "\n\n" + userSystemPrompt : ""}`;
   }
 }
 

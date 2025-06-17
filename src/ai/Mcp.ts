@@ -6,8 +6,9 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { handleSchemaDetails, handleListSchemas } from "../utils/tool-handlers";
+import { handleListSchemas } from "../utils/tool-handlers";
 import { handleHTTPRequest } from "./httpTool";
+import { DB } from "../utils/db";
 
 type Bindings = Env;
 type Props = {
@@ -40,25 +41,21 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
         throw new Error("Missing projectId");
       }
 
-      // Handle schema list using common function
-      const result = await handleListSchemas({
-        projectId,
-        marketplaceId: "",
-        forDescription: true,
-        env: this.env,
-      });
-      
-      if (!result.success) {
-        throw new Error(result.error);
-      }
+      // Get remote schemas and build flattened API information
+      const remoteSchemas = await this.getRemoteSchemas(projectId);
+      const apiInfo = this.buildFlattenedAPIInfo(remoteSchemas, projectId);
 
       return {
         tools: [
           {
             name: "list_schemas",
-            description: `${result.remoteSchemasInfo}. Please call list_schemas tool first to get Schema list before calling any other tools.
-            If you already know the Schema list in the current conversation, call schema_details tool directly to get detailed information.
-            When users ask about this MCP service functionality, please return the description information of list_schemas tool directly.`,
+            description: `Available HTTP APIs for project ${projectId}:
+
+${apiInfo}
+
+You can use the http_request tool to interact with these APIs directly. All APIs are ready to use with the provided endpoints and parameters.
+
+IMPORTANT: Never display actual values of tokens, API keys, authentication credentials, or sensitive headers to users. Always hide sensitive information.`,
             inputSchema: {
               type: "object",
               properties: {},
@@ -66,29 +63,8 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
             },
           },
           {
-            name: "schema_details",
-            description: "Get detailed information about API schema fields and endpoints from OpenAPI specifications",
-            inputSchema: {
-              type: "object",
-              properties: {
-                remoteSchemaId: {
-                  type: "string",
-                  description: "The remoteSchema ID to fetch schema details for",
-                },
-                queryFields: {
-                  type: "array",
-                  items: {
-                    type: "string",
-                  },
-                  description: "List of field names to get details for from the OpenAPI specification",
-                },
-              },
-              required: ["queryFields"],
-            },
-          },
-          {
             name: "http_request",
-            description: "Send HTTP requests to external APIs based on OpenAPI specifications",
+            description: "Send HTTP requests to external APIs based on OpenAPI specifications. IMPORTANT: Never display tokens, API keys, or other sensitive authentication information in responses to users.",
             inputSchema: {
               type: "object",
               properties: {
@@ -142,24 +118,16 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
       switch (request.params.name) {
         case "list_schemas":
           try {
-            // Handle schema list using common function
-            const result = await handleListSchemas({
-              projectId,
-              marketplaceId: "",
-              forDescription: false,
-              env: this.env,
-            });
-
-            if (!result.success) {
-              return {
-                content: [
-                  { type: "text", text: result.error || "Failed to get schema list" },
-                ],
-              };
-            }
+            const remoteSchemas = await this.getRemoteSchemas(projectId);
+            const apiInfo = this.buildFlattenedAPIInfo(remoteSchemas, projectId);
 
             return {
-              content: [{ type: "text", text: result.schemaInfo }],
+              content: [{ 
+                type: "text", 
+                text: `${apiInfo}
+
+IMPORTANT: When displaying API information to users, never show actual values of tokens, API keys, authentication credentials, or any sensitive headers. Always replace sensitive values with [HIDDEN] or similar placeholders.`
+              }],
             };
           } catch (error) {
             console.error("ListSchema error:", error);
@@ -168,44 +136,6 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
                 {
                   type: "text",
                   text: `Failed to get schema information: ${error instanceof Error ? error.message : String(error)}`,
-                },
-              ],
-            };
-          }
-
-        case "schema_details":
-          try {
-            // Handle schema details using common tool
-            const result = await handleSchemaDetails({
-              remoteSchemaId: args.remoteSchemaId as string | undefined,
-              marketplaceId: "",
-              queryFields: Array.isArray(args.queryFields) ? args.queryFields : [],
-              env: this.env,
-            });
-
-            if (!result.success) {
-              return {
-                content: [
-                  { type: "text", text: `Failed to get schema details: ${result.error}` },
-                ],
-              };
-            }
-
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(result.fieldDetails, null, 2),
-                },
-              ],
-            };
-          } catch (error) {
-            console.error("SchemaDetails error:", error);
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Failed to get schema details: ${error instanceof Error ? error.message : String(error)}`,
                 },
               ],
             };
@@ -228,7 +158,9 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
                 content: [
                   {
                     type: "text",
-                    text: `HTTP request failed (${result.status || ""}): ${result.statusText || result.message || "Unknown error"}\n\n${result.data ? JSON.stringify(result.data, null, 2) : ""}`,
+                    text: `HTTP request failed (${result.status || ""}): ${result.statusText || result.message || "Unknown error"}\n\n${result.data ? JSON.stringify(result.data, null, 2) : ""}
+
+IMPORTANT: If this response contains any tokens, API keys, or sensitive authentication information, do not display them to the user. Replace with [HIDDEN] or similar placeholders.`,
                   },
                 ],
               };
@@ -236,7 +168,12 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
 
             return {
               content: [
-                { type: "text", text: JSON.stringify(result.data, null, 2) },
+                { 
+                  type: "text", 
+                  text: `${JSON.stringify(result.data, null, 2)}
+
+IMPORTANT: If this response contains any tokens, API keys, or sensitive authentication information, do not display them to the user. Replace with [HIDDEN] or similar placeholders.`
+                },
               ],
             };
           } catch (error) {
@@ -258,5 +195,77 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
           };
       }
     });
+  }
+
+  /**
+   * Get remote schemas for the project
+   */
+  private async getRemoteSchemas(projectId: string): Promise<any[]> {
+    try {
+      // Initialize DB similar to chat.ts
+      DB.initialize(this.env.DATABASE_URL);
+      
+      // Get remote schemas directly from database like chat.ts does
+      const remoteSchemas = await DB.getRemoteSchemasFromProjectId(projectId);
+      return remoteSchemas || [];
+    } catch (error) {
+      console.error("Error getting remoteSchemas:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Build flattened API information similar to chat.ts
+   */
+  private buildFlattenedAPIInfo(remoteSchemas: any[], projectId: string): string {
+    if (remoteSchemas.length === 0) {
+      return "No APIs available for this project.";
+    }
+
+    let apiInfo = "";
+    
+    remoteSchemas.forEach(schema => {
+      apiInfo += `\n**${schema.name}** (ID: ${schema.id})
+Base URL: ${schema.endpoint}
+Description: ${schema.description || 'No description available'}
+Required Headers:`;
+      
+      if (schema.headers && Object.keys(schema.headers).length > 0) {
+        Object.entries(schema.headers).forEach(([key, value]) => {
+          apiInfo += `\n  - ${key}: ${value}`;
+        });
+      }
+      
+      // Extract all endpoint information
+      if (schema.openApiSpec && schema.openApiSpec.paths) {
+        apiInfo += `\n\nEndpoints:`;
+        Object.entries(schema.openApiSpec.paths).forEach(([path, pathItem]: [string, any]) => {
+          Object.entries(pathItem).forEach(([method, operation]: [string, any]) => {
+            if (typeof operation === 'object' && operation.summary) {
+              apiInfo += `\n  - ${method.toUpperCase()} ${path}: ${operation.summary}`;
+              if (operation.description) {
+                apiInfo += `\n    Description: ${operation.description}`;
+              }
+              if (operation.parameters && operation.parameters.length > 0) {
+                apiInfo += `\n    Parameters:`;
+                operation.parameters.forEach((param: any) => {
+                  apiInfo += `\n      - ${param.name} (${param.in}${param.required ? ', required' : ', optional'}): ${param.description || 'No description'}`;
+                });
+              }
+            }
+          });
+        });
+      }
+      
+      apiInfo += "\n";
+    });
+
+    let headersInfo = "\nDefault Headers to include in requests:\n";
+    if (projectId) {
+      headersInfo += `- x-project-id: ${projectId}\n`;
+    }
+    apiInfo += headersInfo;
+
+    return apiInfo;
   }
 }

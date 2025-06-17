@@ -42,12 +42,24 @@ export const apiKeyMiddleware = async (c: Context<{ Bindings: Env }>, next: Next
   // 如果超过限制，则根据apikey进行验证
   // if (!rateLimitResult.success) {
 
-    // Extract token from Authorization header
-    const authHeader = c.req.header("Authorization") || "";
+    // Extract token from Authorization header first, then from query parameter
     let token = "";
+    
+    // Priority 1: Authorization header
+    const authHeader = c.req.header("Authorization") || "";
     if (authHeader.startsWith("Bearer ")) {
       token = authHeader.substring(7);
     }
+    
+    // Priority 2: Query parameter (for SSE requests)
+    if (!token) {
+      const authParam = c.req.query("authorization");
+      if (authParam) {
+        token = authParam;
+        console.log("Token extracted from query parameter");
+      }
+    }
+    
     if (!token) {
       return c.json(
         {

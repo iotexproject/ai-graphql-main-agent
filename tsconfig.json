@@ -123,5 +123,5 @@
     /* Additional options to help with deep type instantiation */
     "noErrorTruncation": false /* Truncate error messages to avoid excessive output */
   },
-  "exclude": ["tests"]
+  "exclude": ["tests","node_modules"]
 }

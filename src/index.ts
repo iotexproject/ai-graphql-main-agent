@@ -30,10 +30,10 @@ interface Env {
 }
 
 // Application variables type
-type Variables = { 
-  projectId: string; 
-  userId: string | null; 
-  token: string | null; 
+type Variables = {
+  projectId: string;
+  userId: string | null;
+  token: string | null;
 }
 // Create Hono app with proper typing
 const app = new Hono<{
@@ -59,11 +59,11 @@ app.use("*", async (c, next) => {
 
 // app.use(logger());
 
-app.use("/preview/:projectId/v1/chat/completions", apiKeyMiddleware);  
+app.use("/preview/:projectId/v1/chat/completions", apiKeyMiddleware);
 app.post("/preview/:projectId/v1/chat/completions", handleUnifiedChat);
 
 // Unified chat routes - handles both project and global chat
-app.use(":projectId/v1/chat/completions", rateLimitMiddleware);  
+app.use(":projectId/v1/chat/completions", rateLimitMiddleware);
 app.post(":projectId/v1/chat/completions", handleUnifiedChat);
 
 // Global chat route (without projectId)
@@ -74,31 +74,27 @@ app.post("/v1/rag/pinecone", ragValidator, handlePineconeRag);
 app.get("/rag/doc", handleRagDoc);
 
 // has some problem, sometimes  chat will in this endpoint
-// app.mount("/", (req, env, ctx) => {
-//   const url = new URL(req.url);
-//   const authParam = url.searchParams.get("authorization");
-//   console.log(authParam, "authParam");
+app.mount("/", (req, env, ctx) => {
+  const url = new URL(req.url);
+  // const authParam = url.searchParams.get("authorization");
+  // console.log(authParam, "authParam");
 
-//   // 从URL路径中提取projectId
-//   const pathSegments = url.pathname.split('/').filter(Boolean);
-//   let projectId = "";
-  
-//   // 如果路径是 /:projectId/sse 格式，提取projectId
-//   if (pathSegments.length >= 2 && pathSegments[1] === 'sse') {
-//     projectId = pathSegments[0];
-//     console.log(projectId, "extracted projectId from URL path");
-//   }
+  const pathSegments = url.pathname.split('/').filter(Boolean);
+  let projectId = "";
 
-//   ctx.props = {};
-  
-//   if (authParam) {
-//     ctx.props.projectId = authParam;
-//   } else if (projectId) {
-//     ctx.props.projectId = projectId;
-//   }
+  if (pathSegments.length >= 2 && pathSegments[1] === 'sse') {
+    projectId = pathSegments[0];
+    console.log(projectId, "extracted projectId from URL path");
+  }
 
-//   return MyMCP.mount("/").fetch(req, env, ctx);
-// });
+  ctx.props = {};
+
+  if (projectId) {
+    ctx.props.projectId = projectId;
+  }
+
+  return MyMCP.mount("/").fetch(req, env, ctx);
+});
 
 export default {
   fetch: app.fetch.bind(app),

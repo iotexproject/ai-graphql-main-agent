@@ -851,7 +851,6 @@ If your existing knowledge can answer the current user's question, you don't nee
 Important: Please respond in the same language as the user's question. If the user's question is in Chinese, your answer should be in Chinese. If the user's question is in English, your answer should be in English.
 
 CRITICAL TOOL USAGE INSTRUCTIONS:
-You have ONLY ONE TOOL available called "Http Tool" (or "http-request"). 
 - NEVER try to call API endpoints directly as tool names (like "GET /youtube-trending-api" or "POST /users")
 - ALL HTTP requests must be made through the "Http Tool" with proper parameters:
   * url: The complete URL to make the request to
@@ -860,15 +859,6 @@ You have ONLY ONE TOOL available called "Http Tool" (or "http-request").
   * body: Request body for POST/PUT requests
   * params: Query parameters
 
-EXAMPLE OF CORRECT TOOL USAGE:
-Instead of calling a tool named "GET /youtube-trending-api", you should call:
-Tool: "Http Tool" with parameters:
-{
-  "url": "https://api.example.com/youtube-trending-api",
-  "method": "GET",
-  "headers": {"Authorization": "Bearer token", "x-project-id": "project123"},
-  "params": {"limit": 10}
-}
 
 THINKING TAGS INSTRUCTION:
 When processing user requests, you should use thinking tags to show your reasoning process:

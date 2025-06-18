@@ -135,9 +135,9 @@ export const HttpTool = createTool({
   inputSchema: z.object({
     url: z.string(),
     method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH"]).default("GET"),
-    headers: z.record(z.any()).optional(),
+    headers: z.any().optional(),
     body: z.any().optional(),
-    params: z.record(z.any()).optional(),
+    params: z.any().optional(),
   }),
   execute: async (params: any) => {
     try {

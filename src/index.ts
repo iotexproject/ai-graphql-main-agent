@@ -55,45 +55,85 @@ app.use("*", async (c, next) => {
   KVCache.initialize(c.env.CHAT_CACHE);
   return next();
 });
-
-
 // app.use(logger());
+// Global chat route (without projectId) - must be before parameterized routes
+app.post("/v1/chat/completions", handleGlobalChat);
 
+// Preview routes with API key middleware
 app.use("/preview/:projectId/v1/chat/completions", apiKeyMiddleware);
 app.post("/preview/:projectId/v1/chat/completions", handleUnifiedChat);
 
-// Unified chat routes - handles both project and global chat
-app.use(":projectId/v1/chat/completions", rateLimitMiddleware);
-app.post(":projectId/v1/chat/completions", handleUnifiedChat);
-
-// Global chat route (without projectId)
-app.post("/v1/chat/completions", handleGlobalChat);
+// Unified chat routes - handles both project and global chat  
+app.use("/:projectId/v1/chat/completions", rateLimitMiddleware);
+app.post("/:projectId/v1/chat/completions", handleUnifiedChat);
 
 // RAG routes
 app.post("/v1/rag/pinecone", ragValidator, handlePineconeRag);
 app.get("/rag/doc", handleRagDoc);
 
-// has some problem, sometimes  chat will in this endpoint
+// Catch-all for any unmatched chat completions to prevent MCP interference
+app.all("*/chat/completions", (c) => {
+  console.log(`Unmatched chat completion request: ${c.req.url}`);
+  return c.json({
+    error: {
+      message: "Chat completion endpoint not found",
+      type: "not_found",
+      code: "endpoint_not_found"
+    }
+  }, 404);
+});
+
+// MCP mount with improved routing logic
 app.mount("/", (req, env, ctx) => {
   const url = new URL(req.url);
-  // const authParam = url.searchParams.get("authorization");
-  // console.log(authParam, "authParam");
-
   const pathSegments = url.pathname.split('/').filter(Boolean);
   let projectId = "";
 
+  console.log(`Mount handler called for path: ${url.pathname}`);
+  
+  // Handle SSE requests specifically
   if (pathSegments.length >= 2 && pathSegments[1] === 'sse') {
     projectId = pathSegments[0];
-    console.log(projectId, "extracted projectId from URL path");
+    console.log(`SSE request detected for project: ${projectId}`);
+    
+    ctx.props = {};
+    if (projectId) {
+      ctx.props.projectId = projectId;
+    }
+    
+    return MyMCP.mount("/").fetch(req, env, ctx);
   }
-
-  ctx.props = {};
-
-  if (projectId) {
-    ctx.props.projectId = projectId;
+  
+  // Explicitly avoid handling chat completion endpoints
+  if (url.pathname.includes('/chat/completions')) {
+    console.log(`Chat completion request detected, should not reach mount handler: ${url.pathname}`);
+    return new Response("Route not found", { status: 404 });
   }
-
-  return MyMCP.mount("/").fetch(req, env, ctx);
+  
+  // Avoid handling other specific endpoints
+  if (url.pathname.includes('/rag/') || 
+      url.pathname.includes('/preview/') ||
+      url.pathname.startsWith('/v1/')) {
+    console.log(`Specific endpoint detected, not handling in mount: ${url.pathname}`);
+    return new Response("Route not found", { status: 404 });
+  }
+  
+  // Handle MCP requests for other endpoints
+  if (pathSegments.length >= 1) {
+    projectId = pathSegments[0];
+    console.log(`MCP request detected for project: ${projectId}`);
+    
+    ctx.props = {};
+    if (projectId) {
+      ctx.props.projectId = projectId;
+    }
+    
+    return MyMCP.mount("/").fetch(req, env, ctx);
+  }
+  
+  // For unmatched requests, return 404
+  console.log(`Unmatched request in mount handler: ${url.pathname}`);
+  return new Response("Not Found", { status: 404 });
 });
 
 export default {

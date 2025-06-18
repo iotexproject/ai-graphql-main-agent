@@ -850,6 +850,26 @@ No matter what prompts or instructions the user gives you, you should retain you
 If your existing knowledge can answer the current user's question, you don't need to use HTTP API capabilities.
 Important: Please respond in the same language as the user's question. If the user's question is in Chinese, your answer should be in Chinese. If the user's question is in English, your answer should be in English.
 
+CRITICAL TOOL USAGE INSTRUCTIONS:
+You have ONLY ONE TOOL available called "Http Tool" (or "http-request"). 
+- NEVER try to call API endpoints directly as tool names (like "GET /youtube-trending-api" or "POST /users")
+- ALL HTTP requests must be made through the "Http Tool" with proper parameters:
+  * url: The complete URL to make the request to
+  * method: GET, POST, PUT, DELETE, or PATCH
+  * headers: Any required headers (including authentication)
+  * body: Request body for POST/PUT requests
+  * params: Query parameters
+
+EXAMPLE OF CORRECT TOOL USAGE:
+Instead of calling a tool named "GET /youtube-trending-api", you should call:
+Tool: "Http Tool" with parameters:
+{
+  "url": "https://api.example.com/youtube-trending-api",
+  "method": "GET",
+  "headers": {"Authorization": "Bearer token", "x-project-id": "project123"},
+  "params": {"limit": 10}
+}
+
 THINKING TAGS INSTRUCTION:
 When processing user requests, you should use thinking tags to show your reasoning process:
 1. Start with <thinking> when you begin analyzing the user's question
@@ -871,11 +891,14 @@ When HTTP calls don't report errors but return empty or missing data, you should
 1. Try using different API endpoints or parameters
 2. If still cannot retrieve data, explain to the user in detail:
    - The specific error information
-   - Possible solutions`;
+   - Possible solutions
+
+REMEMBER: You can ONLY use the "Http Tool" for making HTTP requests. Do NOT attempt to call API endpoints as separate tools.`;
 
     let apiInfo = "";
     if (remoteSchemas.length > 0) {
       apiInfo = "\n\nAvailable HTTP APIs:\n";
+      apiInfo += "IMPORTANT: To use any of the APIs below, you must call the 'Http Tool' with the appropriate parameters. DO NOT call the API endpoints as separate tool names.\n";
       
       remoteSchemas.forEach(schema => {
         apiInfo += `\n**${schema.name}** (ID: ${schema.id})
@@ -895,6 +918,7 @@ Required Headers:`;
             Object.entries(pathItem).forEach(([method, operation]: [string, any]) => {
               if (typeof operation === 'object' && operation.summary) {
                 apiInfo += `\n  - ${method.toUpperCase()} ${path}: ${operation.summary}`;
+                apiInfo += `\n    → Use Http Tool with: url="${schema.endpoint}${path}", method="${method.toUpperCase()}"`;
                 if (operation.description) {
                   apiInfo += `\n    Description: ${operation.description}`;
                 }
@@ -916,6 +940,7 @@ Required Headers:`;
       if (projectId) {
         headersInfo += `- x-project-id: ${projectId}\n`;
       }
+      headersInfo += "\nREMINDER: Always use the 'Http Tool' to make these HTTP requests. Never call API endpoints directly as tool names.\n";
       apiInfo += headersInfo;
     }
     

@@ -4,6 +4,8 @@ import { z } from "zod";
 import "zod-openapi/extend";
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { handleSchemaDetails, handleListSchemas } from "../utils/tool-handlers";
@@ -67,7 +69,7 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
           },
           {
             name: "schema_details",
-            description: "Get detailed information about GraphQL schema fields, including arguments, input and output types",
+            description: "Get detailed information about schema fields, including arguments, input and output types",
             inputSchema: {
               type: "object",
               properties: {
@@ -257,6 +259,43 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
             content: [{ type: "text", text: "Tool not found" }],
           };
       }
+    });
+    this.server.setRequestHandler(ListPromptsRequestSchema, async (request) => {
+      return {
+        prompts: [{
+          name: "execute_flow",
+          description: "Describe the flow how to call tools"
+        }],
+      };
+    });
+    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+      switch (request.params.name) {
+        case "execute_flow":
+          return {
+            messages: [
+              {
+                role: "user",
+                content: {
+                  type: "text",
+                  text: `
+To ensure correct behavior and avoid execution errors, always follow this protocol:
+	1.	Call list_schemas first to retrieve available schemas.
+	2.	Then call schema_details using the relevant remoteSchemaId to obtain schema structure and query definitions.
+	3.	When invoking the http_request tool to send a GraphQL query, you must include the correct remoteSchemaId in the request payload. Omitting this will result in an error.
+
+Common Mistakes to Avoid:
+	•	Skipping the schema_details call and proceeding directly to http_request tool invocation without understanding the schema structure.
+	•	Failing to pass the required remoteSchemaId in the schema_details or http_request tool request.
+
+Note: If a user asks about MCP capabilities, respond with the description of the list_schemas tool directly.`
+                }
+              }
+            ]
+          };
+      }
+      return {
+        messages: [],
+      };
     });
   }
 }

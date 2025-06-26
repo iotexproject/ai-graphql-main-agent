@@ -157,6 +157,16 @@ export class DB {
     }
   }
 
+  static async getProjects(): Promise<any[]> {
+    try {
+      const result = await this.query('SELECT id, name, description, "isOffical", prompt FROM projects');
+      return result?.rows || [];
+    } catch (error) {
+      console.error('Error querying projects from DB:', error);
+      return [];
+    }
+  }
+
   /**
    * 根据ID查询单个remoteSchema
    * @param remoteSchemaId remoteSchema的ID

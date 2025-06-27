@@ -44,7 +44,7 @@ export class MyMCP extends McpAgent<Bindings, State, Props> {
 
         return {
           tools: [
-                        {
+            {
               name: "tool_usage_guide",
               description: `🚨 CRITICAL: ALWAYS CALL THIS TOOL FIRST! 🚨
               
@@ -81,7 +81,7 @@ IMPORTANT: Never display actual values of tokens, API keys, authentication crede
             },
             {
               name: "http_request",
-              description: "Send HTTP requests to external APIs based on OpenAPI specifications. IMPORTANT: Never display tokens, API keys, or other sensitive authentication information in responses to users.",
+              description: "Send HTTP requests to external APIs based on OpenAPI specifications. ",
               inputSchema: {
                 type: "object",
                 properties: {
@@ -95,18 +95,16 @@ IMPORTANT: Never display actual values of tokens, API keys, authentication crede
                     description: "The HTTP method to use",
                   },
                   headers: {
-                    type: "object",
-                    additionalProperties: { type: "string" },
-                    description: "HTTP headers to include in the request",
+                    type: "string",
+                    description: "json string object like {\"Content-Type\": \"application/json\"}",
                   },
                   body: {
-                    type: "object",
-                    description: "The request body (for POST, PUT, etc.)",
+                    type: "string",
+                    description: "json string object like {\"name\": \"John\", \"age\": 30}",
                   },
                   params: {
-                    type: "object",
-                    additionalProperties: { type: "string" },
-                    description: "URL query parameters",
+                    type: "string",
+                    description: "json string object like {\"name\": \"John\", \"age\": 30}",
                   },
                 },
                 required: ["url", "method"],
@@ -117,9 +115,9 @@ IMPORTANT: Never display actual values of tokens, API keys, authentication crede
       } else {
         return {
           tools: [
-                      {
-            name: "tool_usage_guide",
-            description: `🚨 CRITICAL: ALWAYS CALL THIS TOOL FIRST! 🚨
+            {
+              name: "tool_usage_guide",
+              description: `🚨 CRITICAL: ALWAYS CALL THIS TOOL FIRST! 🚨
             
             This is the MANDATORY FIRST TOOL that must be called before using any other tools. It provides essential usage guidance and calling sequences.
             
@@ -267,13 +265,28 @@ IMPORTANT: When displaying API information to users, never show actual values of
 
           case "http_request":
             try {
+              // console.log(args, "args!!!!!!!!!!!!!!");
+              // Safe JSON parsing helper function
+              const safeJsonParse = (value: any) => {
+                if (!value) return undefined;
+                if (typeof value === 'string') {
+                  try {
+                    return JSON.parse(value);
+                  } catch (error) {
+                    console.warn('Failed to parse JSON string:', value, error);
+                    return undefined;
+                  }
+                }
+                return value;
+              };
+              
               // Handle HTTP request using common tool
               const result = await handleHTTPRequest({
                 url: args.url as string,
                 method: args.method as string,
-                headers: args.headers as Record<string, string> | undefined,
-                body: args.body,
-                params: args.params as Record<string, string> | undefined,
+                headers: safeJsonParse(args.headers) as Record<string, string> | undefined,
+                body: safeJsonParse(args.body),
+                params: safeJsonParse(args.params) as Record<string, string> | undefined,
                 env: this.env,
               });
 
@@ -353,22 +366,22 @@ Current Project ID: ${projectId}
                 },
               ],
             };
-            case "list_projects":
-              try {
-                // Handle schema list using common function
-                const result = await this.getProjects();
-                return {
-                  content: [{ type: "text", text: result }],
-                };
-              } catch (error) {
-                console.error("ListProjects error:", error);
-                return {
-                  content: [
-                    { type: "text", text: `Failed to get project list: ${error instanceof Error ? error.message : String(error)}` },
-                  ],
-                };
-              }
-            case "list_schemas":
+          case "list_projects":
+            try {
+              // Handle schema list using common function
+              const result = await this.getProjects();
+              return {
+                content: [{ type: "text", text: result }],
+              };
+            } catch (error) {
+              console.error("ListProjects error:", error);
+              return {
+                content: [
+                  { type: "text", text: `Failed to get project list: ${error instanceof Error ? error.message : String(error)}` },
+                ],
+              };
+            }
+          case "list_schemas":
             try {
               const remoteSchemas = await this.getRemoteSchemas(projectId);
               const apiInfo = this.buildFlattenedAPIInfo(remoteSchemas, projectId);
@@ -395,13 +408,29 @@ IMPORTANT: When displaying API information to users, never show actual values of
 
           case "http_request":
             try {
+              console.log(args, "args!!!!!!!!!!!!!!");
+              
+              // Safe JSON parsing helper function
+              const safeJsonParse = (value: any) => {
+                if (!value) return undefined;
+                if (typeof value === 'string') {
+                  try {
+                    return JSON.parse(value);
+                  } catch (error) {
+                    console.warn('Failed to parse JSON string:', value, error);
+                    return undefined;
+                  }
+                }
+                return value;
+              };
+              
               // Handle HTTP request using common tool
               const result = await handleHTTPRequest({
                 url: args.url as string,
                 method: args.method as string,
-                headers: args.headers as Record<string, string> | undefined,
-                body: args.body,
-                params: args.params as Record<string, string> | undefined,
+                headers: safeJsonParse(args.headers) as Record<string, string> | undefined,
+                body: safeJsonParse(args.body),
+                params: safeJsonParse(args.params) as Record<string, string> | undefined,
                 env: this.env,
               });
 

@@ -278,6 +278,75 @@ export class ApiKeyManager {
         })
     }
 
+    /**
+     * 检查用户是否有激活的订阅
+     * @param resourceId 用户的外部ID (external ID)
+     * @returns 是否有激活订阅
+     */
+    checkActiveSubscription = async ({ resourceId }: { resourceId: string }): Promise<boolean> => {
+        const cacheKey = `active_subscription_${resourceId}`;
+        
+        try {
+            // 使用KVCache.wrap做缓存，缓存5分钟
+            const hasActive = await (await import('../utils/kv')).KVCache.wrap(
+                cacheKey,
+                async () => {
+                    try {
+                        // 第一步：通过 external ID 获取 customer 信息
+                        const customer = await this.polarClient.customers.getExternal({
+                            externalId: resourceId
+                        });
+                        
+                        if (!customer) {
+                            console.log(`Customer with external ID ${resourceId} not found`);
+                            return false;
+                        }
+
+                        // 第二步：使用真正的 customer ID 查询订阅
+                        const result = await this.polarClient.subscriptions.list({
+                            customerId: [customer.id], // 使用真正的 customer UUID
+                            active: true, // 只查询激活的订阅
+                            limit: 1 // 只需要知道是否有激活订阅，所以限制为1条
+                        });
+
+                        let hasActiveSubscription = false;
+                        for await (const page of result) {
+                            // page 本身就包含结果数据
+                            if (page.result && page.result.items && page.result.items.length > 0) {
+                                // 检查是否有状态为active的订阅
+                                hasActiveSubscription = page.result.items.some((subscription: any) => 
+                                    subscription.status === 'active' || 
+                                    subscription.status === 'trialing' ||
+                                    subscription.status === 'past_due'
+                                );
+                                break;
+                            }
+                        }
+
+                        console.log(`User ${resourceId} (customer ID: ${customer.id}) active subscription status: ${hasActiveSubscription}`);
+                        return hasActiveSubscription;
+                    } catch (customerError: any) {
+                        // 如果客户不存在，可能还没有创建客户记录
+                        if (customerError?.status === 404) {
+                            console.log(`Customer with external ID ${resourceId} not found in Polar`);
+                            return false;
+                        }
+                        throw customerError;
+                    }
+                },
+                {
+                    ttl: 300, // 缓存5分钟
+                }
+            );
+            
+            return hasActive;
+        } catch (error) {
+            console.error(`Error checking active subscription for user ${resourceId}:`, error);
+            // 出错时默认返回false
+            return false;
+        }
+    }
+
     verifyKeyFromRemote = async ({ resourceId, cost, projectSlug }: { resourceId: string, cost: number, projectSlug: string }) => {
         // Send usage event to remote service
         await this.ingestEvent({ resourceId, cost, projectSlug })

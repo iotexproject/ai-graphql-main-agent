@@ -40,6 +40,8 @@
     "@openrouter/ai-sdk-provider": "^0.4.5",
     "@polar-sh/sdk": "^0.32.15",
     "@types/pg": "^8.15.2",
+    "@unilab/urpc": "^0.0.1",
+    "@unilab/urpc-core": "^0.0.1",
     "agent": "^0.2.1",
     "agents": "^0.0.87",
     "ai": "^4.3.4",

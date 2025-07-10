@@ -24,11 +24,11 @@ type Variables = {
 /**
  * Unified chat handler that automatically determines if it's project or global chat
  */
-export const handleUnifiedChat = async (c: Context<{ Bindings: Env; Variables: Variables }>) => {
+export const handleUnifiedChat = async (c: Context<{ Bindings: Env; Variables: Variables }>, isInner: boolean = false) => {
   try {
     const projectId = c.req.param("projectId");
     console.log(projectId, "projectId");
-    return await handleProjectChatLogic(c, projectId);
+    return await handleProjectChatLogic(c, projectId, isInner);
   } catch (error) {
     console.error("Error in unified chat handler:", error);
     return c.json(
@@ -48,7 +48,7 @@ export const handleUnifiedChat = async (c: Context<{ Bindings: Env; Variables: V
 /**
  * Project chat logic
  */
-const handleProjectChatLogic = async (c: Context<{ Bindings: Env; Variables: Variables }>, projectId: string) => {
+const handleProjectChatLogic = async (c: Context<{ Bindings: Env; Variables: Variables }>, projectId: string, isInner: boolean = false) => {
   try {
     const chatId = c.env.Chat.idFromName(projectId);
     const chatDO = c.env.Chat.get(chatId);
@@ -56,9 +56,10 @@ const handleProjectChatLogic = async (c: Context<{ Bindings: Env; Variables: Var
     const newRequest = new Request(c.req.url, {
       method: c.req.method,
       headers: c.req.raw.headers,
-      body: c.req.raw.body,
+      body: c.req.raw.body
     });
     newRequest.headers.set("X-Project-Id", projectId);
+    newRequest.headers.set("X-Inner-Chat", isInner.toString());
     return chatDO.fetch(newRequest);
   } catch (error) {
     console.error("Error in project chat:", error);
@@ -79,7 +80,7 @@ const handleProjectChatLogic = async (c: Context<{ Bindings: Env; Variables: Var
 /**
  * Global chat logic - Modified to avoid I/O conflicts
  */
-const handleGlobalChatLogic = async (c: Context<{ Bindings: Env; Variables: Variables }>) => {
+const handleGlobalChatLogic = async (c: Context<{ Bindings: Env; Variables: Variables }>, isInner: boolean = false) => {
   try {
     // Use a special project ID for global chat
     const globalChatId = "global-chat-router";
@@ -96,6 +97,7 @@ const handleGlobalChatLogic = async (c: Context<{ Bindings: Env; Variables: Vari
     // Add special header to indicate this is global chat
     newRequest.headers.set("X-Project-Id", globalChatId);
     newRequest.headers.set("X-Global-Chat", "true");
+    newRequest.headers.set("X-Inner-Chat", isInner.toString());
 
     const response = await chatDO.fetch(newRequest);
     return new Response(response.body, response);
@@ -117,6 +119,6 @@ export const handleProjectChat = async (c: Context<{ Bindings: Env; Variables: V
   return await handleProjectChatLogic(c, projectId);
 };
 
-export const handleGlobalChat = async (c: Context<{ Bindings: Env; Variables: Variables }>) => {
-  return await handleGlobalChatLogic(c);
+export const handleGlobalChat = async (c: Context<{ Bindings: Env; Variables: Variables }>, isInner: boolean = false) => {
+  return await handleGlobalChatLogic(c, isInner);
 }; 

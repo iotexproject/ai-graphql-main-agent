@@ -97,6 +97,7 @@ export class Chat {
 
     this.request = request;
 
+
     if (request.method !== "POST") {
       console.log("Method not allowed:", request.method);
       return new Response("Method not allowed", { status: 405 });
@@ -112,10 +113,10 @@ export class Chat {
       }
 
       const body = (await request.json()) as ChatRequestBody;
-
+      const isInner = request.headers.get("X-Inner-Chat") === "true";
       // Handle global chat logic within Durable Object
       if (isGlobalChat) {
-        return await this.handleGlobalChatInDO(body);
+        return await this.handleGlobalChatInDO(body, isInner);
       }
 
       // Regular project chat logic
@@ -134,12 +135,12 @@ export class Chat {
           status: 400
         });
       }
-      const getAgent = async (controller?: ReadableStreamDefaultController) => {
+      const getAgent = async (controller: ReadableStreamDefaultController | null) => {
         const encoder = new TextEncoder();
         const streamId = "chatcmpl-" + Date.now().toString(36);
         
         // 创建思考模拟器
-        const thinkingSimulator = controller ? new ThinkingSimulator(controller, streamId) : null;
+        const thinkingSimulator = controller ? new ThinkingSimulator(controller, streamId, isInner) : null;
         
         // Extract system messages from user input
         const userSystemMessages = messages.filter(msg => msg.role === "system");
@@ -185,7 +186,7 @@ export class Chat {
             const noApiContent = "Current project has no API interfaces configured, will use web search to answer your question...";
             await thinkingSimulator.startThinking(noApiContent);
           }
-          return await this.useSoraModelInDO({ ...body, messages }, controller);
+          return await this.useSoraModelInDO({ ...body, messages }, controller, isInner);
         }
         
         // 数据加载完成，结束loading思考，开始answering思考
@@ -258,9 +259,9 @@ export class Chat {
       }
       // Handle streaming or standard response
       if (body.stream === true) {
-        return this.handleStreamingResponseV2(getAgent);
+        return this.handleStreamingResponseV2(getAgent, isInner);
       } else {
-        const result = await getAgent();
+        const result = await getAgent(null);
         // 检查是否是Response类型（sonar模型的返回）
         if (result instanceof Response) {
           return result;
@@ -382,7 +383,7 @@ export class Chat {
   /**
  * Handle streaming response
  */
-  private handleStreamingResponseV2(getAgent: (controller: ReadableStreamDefaultController) => Promise<any>): Response {
+  private handleStreamingResponseV2(getAgent: (controller: ReadableStreamDefaultController) => Promise<any>, isInner: boolean): Response {
     // console.log(agent, "prompt");
     const streamId = "chatcmpl-" + Date.now().toString(36);
     // const showToolEvents = this.request?.headers.get("withToolEvent") !== null;
@@ -410,7 +411,7 @@ export class Chat {
           ];
           const finalContent = finalThinkingContents[Math.floor(Math.random() * finalThinkingContents.length)];
           
-          const finalThinkingSimulator = new ThinkingSimulator(controller, streamId);
+          const finalThinkingSimulator = new ThinkingSimulator(controller, streamId, isInner);
           const thinkingPromise = finalThinkingSimulator.startThinking(finalContent);
           
           let hasStartedAIOutput = false;
@@ -425,13 +426,14 @@ export class Chat {
               
               // console.log("Text delta received:", part.textDelta);
               controller.enqueue(
-                encoder.encode(formatStreamingData(part.textDelta, streamId))
+                encoder.encode(formatStreamingData(part.textDelta, streamId, '', isInner))
               );
             }
             else if (["tool-call", "tool-call-streaming-start", "tool-result"].includes(part.type)) {
               console.log("Tool event received:", part.type);
-              const formattedData = handleToolEvent(part.type, part, streamId, showToolEvents);
+              const formattedData = handleToolEvent(part.type, part, streamId, showToolEvents, isInner);
               if (formattedData) {
+                console.log("Formatted data:", formattedData);
                 controller.enqueue(encoder.encode(formattedData));
               }
             } else if (part.type === "error") {
@@ -448,13 +450,13 @@ export class Chat {
                 errorMessage = JSON.stringify(part.error, null, 2);
               }
             } else {
-              console.log("Unknown event:", part);
+              // console.log("Unknown event:", part);
             }
           }
           if (errorMessage) {
-            controller.enqueue(encoder.encode(formatStreamingData(errorMessage, streamId)));
+            controller.enqueue(encoder.encode(formatStreamingData(errorMessage, streamId, '', isInner)));
           }
-          controller.enqueue(encoder.encode(formatStreamingData("", streamId, "stop")));
+          controller.enqueue(encoder.encode(formatStreamingData("", streamId, "stop", isInner)));
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         } catch (error) {
           console.error("Error in stream processing:", error);
@@ -472,8 +474,8 @@ export class Chat {
             errorMessage = `\n\n[Error: ${(error as any).message}]`;
           }
           
-          controller.enqueue(encoder.encode(formatStreamingData(errorMessage, streamId)));
-          controller.enqueue(encoder.encode(formatStreamingData("", streamId, "stop")));
+          controller.enqueue(encoder.encode(formatStreamingData(errorMessage, streamId, '', isInner)));
+          controller.enqueue(encoder.encode(formatStreamingData("", streamId, "stop", isInner)));
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         } finally {
           console.log("Stream closed");
@@ -565,7 +567,7 @@ export class Chat {
   /**
    * Handle global chat logic within Durable Object
    */
-  private async handleGlobalChatInDO(body: ChatRequestBody): Promise<Response> {
+  private async handleGlobalChatInDO(body: ChatRequestBody, isInner: boolean): Promise<Response> {
     try {
       const requestMessages = body.messages || [];
       const isStream = body.stream === true;
@@ -578,12 +580,12 @@ export class Chat {
           status: 400
         });
       }
-      const getAgent = async (controller?: ReadableStreamDefaultController) => {
+      const getAgent = async (controller: ReadableStreamDefaultController | null) => {
         const encoder = new TextEncoder();
         const streamId = "chatcmpl-" + Date.now().toString(36);
         
         // 创建思考模拟器
-        const thinkingSimulator = controller ? new ThinkingSimulator(controller, streamId) : null;
+        const thinkingSimulator = controller ? new ThinkingSimulator(controller, streamId, isInner) : null;
         
         const userMessage = requestMessages[requestMessages.length - 1]?.content || "";
         
@@ -605,7 +607,7 @@ export class Chat {
             const noProjectContent = "No available projects found, will use web search to answer your question...";
             await thinkingSimulator.startThinking(noProjectContent);
           }
-          return await this.useSoraModelInDO(body, controller);
+          return await this.useSoraModelInDO(body, controller, isInner);
         }
         
         const projectsInfo = publishedProjects.map((project, index) =>
@@ -652,7 +654,7 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
             const noSuitableProjectContent = "No suitable project found to answer this question, will use web search...";
             await thinkingSimulator.startThinking(noSuitableProjectContent);
           }
-          return await this.useSoraModelInDO(body, controller);
+          return await this.useSoraModelInDO(body, controller, isInner);
         }
 
         console.log(`Selected project: ${selectedProjectId}`);
@@ -697,7 +699,7 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
             const noApiInProjectContent = `Project "${selectedProject.name}" has no configured API interfaces, will use web search to answer...`;
             await thinkingSimulator.startThinking(noApiInProjectContent);
           }
-          return await this.useSoraModelInDO(body, controller);
+          return await this.useSoraModelInDO(body, controller, isInner);
         }
         
         if (thinkingSimulator) {
@@ -734,9 +736,9 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
       }
 
       if (body.stream === true) {
-        return this.handleStreamingResponseV2(getAgent);
+        return this.handleStreamingResponseV2(getAgent, isInner);
       } else {
-        const result: any = await getAgent();
+        const result: any = await getAgent(null);
         if (result instanceof Response) {
           return result;
         }
@@ -756,7 +758,7 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
   /**
    * Use Sora model within Durable Object
    */
-  private async useSoraModelInDO(body: ChatRequestBody, controller?: ReadableStreamDefaultController): Promise<Response> {
+  private async useSoraModelInDO(body: ChatRequestBody, controller: ReadableStreamDefaultController | null, isInner: boolean): Promise<Response> {
     try {
       const messages = body.messages || [];
       const prompt = messages
@@ -779,13 +781,13 @@ Please return ONLY the Project ID or "NONE" (without quotes), no other text.`;
 
         const streamId = "chatcmpl-" + Date.now().toString(36);
         const encoder = new TextEncoder();
-        controller!.enqueue(encoder.encode(formatStreamingData("", streamId)));
+        controller!.enqueue(encoder.encode(formatStreamingData("", streamId, '', isInner)));
 
         try {
           for await (const delta of result.textStream) {
-            controller!.enqueue(encoder.encode(formatStreamingData(delta, streamId)));
+            controller!.enqueue(encoder.encode(formatStreamingData(delta, streamId, '', isInner)));
           }
-          controller!.enqueue(encoder.encode(formatStreamingData("", streamId, "stop")));
+          controller!.enqueue(encoder.encode(formatStreamingData("", streamId, "stop", isInner)));
           controller!.enqueue(encoder.encode("data: [DONE]\n\n"));
         } catch (error) {
           console.error("Error in sora stream:", error);
@@ -883,6 +885,18 @@ When HTTP calls don't report errors but return empty or missing data, you should
    - The specific error information
    - Possible solutions
 
+ERROR HANDLING RULE - USER-FRIENDLY MESSAGES:
+When encountering any errors or failures, you MUST provide user-friendly explanations instead of technical error messages:
+- Never show technical error codes, stack traces, or developer jargon to users
+- Always translate technical errors into plain, understandable language
+- Provide actionable suggestions when possible
+- Use empathetic and helpful tone
+- Examples of user-friendly error messages:
+  * Instead of "AI_TypeValidationError" → "I encountered a format issue while processing your request, please try rephrasing your question"
+  * Instead of "Network timeout" → "The request is taking longer than usual, please try again in a moment"
+  * Instead of "401 Unauthorized" → "There seems to be an authentication issue, please contact support"
+  * Instead of "Rate limit exceeded" → "Too many requests at once, please wait a moment and try again"
+
 REMEMBER: You can ONLY use the "Http Tool" for making HTTP requests. Do NOT attempt to call API endpoints as separate tools.`;
 
     let apiInfo = "";
@@ -944,7 +958,8 @@ Required Headers:`;
 function formatStreamingData(
   content: string,
   id: string,
-  finishReason: string | null = null
+  finishReason: string | null = null,
+  isInner: boolean
 ): string {
   const data = {
     id,
@@ -959,7 +974,7 @@ function formatStreamingData(
       },
     ],
   };
-  return `data: ${JSON.stringify(data)}\n\n`;
+  return isInner ? `data: ${content}\n\n` : `data: ${JSON.stringify(data)}\n\n`;
 }
 
 /**
@@ -969,7 +984,8 @@ function handleToolEvent(
   eventType: string,
   part: any,
   streamId: string,
-  showToolEvents: boolean = false
+  showToolEvents: boolean = false,
+  isInner: boolean
 ): string | null {
   if (!showToolEvents) {
     return null;
@@ -990,5 +1006,5 @@ function handleToolEvent(
       return null;
   }
 
-  return formatStreamingData(eventData, streamId);
+  return formatStreamingData(eventData, streamId, '', isInner);
 }

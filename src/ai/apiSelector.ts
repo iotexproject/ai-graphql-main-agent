@@ -60,7 +60,7 @@ export class APISelector {
     const simplifiedAPICatalog = remoteSchemas.map(schema => this.buildSimplifiedAPIInfo(schema));
 
     const selectionPrompt = this.buildAPISelectionPrompt(simplifiedAPICatalog, userMessage);
-    console.log("selectionPrompt", selectionPrompt);
+    // console.log("selectionPrompt", selectionPrompt);
     
     try {
       const { generateText } = await import("ai");

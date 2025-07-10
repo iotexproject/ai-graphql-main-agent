@@ -10,11 +10,13 @@ export class ThinkingSimulator {
   private currentIndex: number = 0;
   private isTyping: boolean = false;
   private typingTimeout: any = null;
+  private isInner: boolean = false;
 
-  constructor(controller: ReadableStreamDefaultController, streamId: string) {
+  constructor(controller: ReadableStreamDefaultController, streamId: string, isInner: boolean) {
     this.controller = controller;
     this.encoder = new TextEncoder();
     this.streamId = streamId;
+    this.isInner = isInner;
   }
 
   /**
@@ -121,7 +123,7 @@ export class ThinkingSimulator {
         },
       ],
     };
-    return `data: ${JSON.stringify(data)}\n\n`;
+    return this.isInner ? `data: ${content}\n\n` : `data: ${JSON.stringify(data)}\n\n`;
   }
 
   /**

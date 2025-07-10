@@ -57,15 +57,14 @@ app.use("*", async (c, next) => {
 });
 // app.use(logger());
 // Global chat route (without projectId) - must be before parameterized routes
-app.post("/v1/chat/completions", handleGlobalChat);
-
-// Preview routes with API key middleware
-app.use("/preview/:projectId/v1/chat/completions", apiKeyMiddleware);
-app.post("/preview/:projectId/v1/chat/completions", handleUnifiedChat);
+app.post("/v1/chat/completions", (c: any) => handleGlobalChat(c, false));
+app.post("inner/v1/chat/completions", (c: any) => handleGlobalChat(c, true));
 
 // Unified chat routes - handles both project and global chat  
 app.use("/:projectId/v1/chat/completions", combinedAuthMiddleware);
-app.post("/:projectId/v1/chat/completions", handleUnifiedChat);
+app.post("/:projectId/v1/chat/completions", (c: any) => handleUnifiedChat(c, false));
+
+app.post("inner/:projectId/v1/chat/completions", (c: any) => handleUnifiedChat(c, true));
 
 // RAG routes
 app.post("/v1/rag/pinecone", ragValidator, handlePineconeRag);

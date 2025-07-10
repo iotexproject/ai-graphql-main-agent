@@ -88,7 +88,8 @@ export const apiKeyMiddleware = async (c: Context<{ Bindings: Env }>, next: Next
   const projectPrice = await KVCache.wrap(
     `project_price_${projectId}`,
     async () => {
-      const projectPrice = await DB.query(
+      const projectPrice = await DB.queryInDO(
+        null,
         `SELECT pricing->>'price' as price FROM projects WHERE id = $1`,
         [projectId]
       );
@@ -248,7 +249,8 @@ export const combinedAuthMiddleware = async (c: Context<{ Bindings: Env }>, next
   const projectPrice = await KVCache.wrap(
     `project_price_${projectId}`,
     async () => {
-      const projectPrice = await DB.query(
+      const projectPrice = await DB.queryInDO(
+        null,
         `SELECT pricing->>'price' as price FROM projects WHERE id = $1`,
         [projectId]
       );

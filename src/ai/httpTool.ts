@@ -130,8 +130,7 @@ export const handleHTTPRequest = async ({ url, method, headers = {}, body, param
 };
 
 export const HttpTool = createTool({
-  id: "http-request",
-  description: "Make HTTP requests to external APIs",
+
   inputSchema: z.object({
     url: z.string().describe("The URL to make the request to"),
     method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH"]).default("GET").describe("The HTTP method to use"),
@@ -162,3 +161,5 @@ export const HttpTool = createTool({
     }
   },
 }); 
+
+
